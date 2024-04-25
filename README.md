@@ -1,6 +1,7 @@
 # O2 On Demand Hack
 
 This project automates 2GB data add-on via SMS for O2's Unlimited On Demand service after 10GB limit.
+Thıs code sends "WEITER" SMS for you.
 You can check here for supported Huawei LTE/5G modems: https://github.com/Salamek/huawei-lte-api
 
 ## Installation
