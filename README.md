@@ -7,7 +7,7 @@ You can check here for supported Huawei LTE/5G modems: https://github.com/Salame
 
 1. **Clone the Repository:**
     ```bash
-    git clone [URL of repository]
+    git clone https://github.com/e-onux/o2-on-demand-sms-sendery
     cd O2-On-Demand-Hack
     ```
 
