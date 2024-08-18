@@ -65,7 +65,11 @@ def reset_data_usage(client):
 def check_data_usage_and_send_sms(client):
     month_stats = client.monitoring.month_statistics()
     total_data = int(month_stats['CurrentMonthDownload']) + int(month_stats['CurrentMonthUpload'])
+    total_usage_gb = total_data / (1024**3)  # Convert bytes to GB
+    print(f"Current usage: {total_usage_gb:.2f} GB")
     last_byte, last_time = read_last_sms_info()
+    last_usage_gb = last_byte / (1024**3)  # Convert bytes to GB
+    print(f"Last usage: {last_usage_gb:.2f} GB - {int((time.time()-last_time)/60)} min ago.")
 
     if total_data >= last_byte + 2 * 10**9:  # Check for 2GB increase
         client.sms.send_sms(['80112'], 'WEITER')
