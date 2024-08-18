@@ -76,12 +76,6 @@ def check_data_usage_and_send_sms(client):
         write_last_sms_info(total_data)
         print("SMS sent due to 2GB data usage threshold exceeded.")
 
-# Initial SMS on script start if it has been an hour since the last SMS
-if time.time() - read_last_sms_info()[1] > 3600:  # 1 hour check
-    client.sms.send_sms(['80112'], 'WEITER')
-    write_last_sms_info(read_last_sms_info()[0])
-    print("Initial WEITER message sent on script start.")
-
 # Daily data usage reset check
 reset_data_usage(client)
 
