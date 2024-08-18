@@ -1,12 +1,13 @@
+import os
+import time
+import datetime
 from huawei_lte_api.Client import Client
 from huawei_lte_api.Connection import Connection
 from huawei_lte_api.AuthorizedConnection import AuthorizedConnection
 from huawei_lte_api.exceptions import ResponseErrorException, LoginErrorAlreadyLoginException
 from dotenv import load_dotenv
-import os
-import time
 
-load_dotenv()  # Loads the .env file
+load_dotenv()  # Load the .env file
 
 # Retrieve the username and password from environment variables
 username = os.getenv('API_USER')
@@ -14,7 +15,6 @@ password = os.getenv('API_PASSWORD')
 
 # Enter your modem's IP address and, if necessary, the port number here.
 url = 'http://192.168.8.1/'
-# Attempt to logout before making a new authorized connection
 
 def attempt_login(max_retries=3):
     retries = 0
@@ -23,40 +23,73 @@ def attempt_login(max_retries=3):
             connection = AuthorizedConnection(url, username=username, password=password)
             client = Client(connection)
             print("Logged in!")
-            return client  # Successful login, return the client
+            return client
         except LoginErrorAlreadyLoginException:
             print("Already logged in, retrying after delay...")
-            time.sleep(10)  # Wait for 10 seconds before retrying
+            time.sleep(10)
             retries += 1
-    # If we exhaust retries and still don't have a client, handle the situation:
     raise Exception("Failed to login after several attempts.")
 
-# Use the function
 client = attempt_login()
 
-# Retrieve all messages from the SMS inbox.
-sms_list = client.sms.get_sms_list()
+def read_last_sms_info():
+    try:
+        with open('last_sms_info.txt', 'r') as file:
+            last_data = file.read().split(',')
+            last_byte = int(last_data[0])
+            last_time = float(last_data[1])
+            return last_byte, last_time
+    except FileNotFoundError:
+        return 0, 0  # Defaults if file does not exist
 
-# Check for SMS from 80112 that are unread and do not contain a specific text to mark and send.
-exclude_text = "wurde erfolgreich aktiviert"
-send_sms = False
-for sms in sms_list['Messages']['Message']:
-    if sms['Phone'] == '80112' and sms['Smstat'] == '0' and exclude_text not in sms['Content']:
-        # Mark the SMS as read
-        client.sms.set_read(sms['Index'])
-        print(f"From: {sms['Phone']}, Message: {sms['Content']}")
-        send_sms = True
+def write_last_sms_info(total_data):
+    with open('last_sms_info.txt', 'w') as file:
+        file.write(f"{total_data},{time.time()}")
 
+def reset_data_usage(client):
+    month_stats = client.monitoring.month_statistics()
+    last_clear_time = month_stats['MonthLastClearTime']
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
 
-# If there is a relevant SMS, send "WEITER" to 80112.
-if send_sms:
+    # Tarih formatını düzeltme
+    last_clear_time_formatted = datetime.datetime.strptime(last_clear_time, '%Y-%m-%d').strftime('%Y-%m-%d')
+
+    print(f"Last clear time: {last_clear_time_formatted}, Today: {today}")
+
+    if today != last_clear_time_formatted:
+        client.monitoring.set_clear_traffic()
+        print("Data usage has been reset.")
+    else:
+        print("No reset needed, already cleared today.")
+
+def check_data_usage_and_send_sms(client):
+    month_stats = client.monitoring.month_statistics()
+    total_data = int(month_stats['CurrentMonthDownload']) + int(month_stats['CurrentMonthUpload'])
+    last_byte, last_time = read_last_sms_info()
+
+    if total_data >= last_byte + 2 * 10**9:  # Check for 2GB increase
+        client.sms.send_sms(['80112'], 'WEITER')
+        write_last_sms_info(total_data)
+        print("SMS sent due to 2GB data usage threshold exceeded.")
+
+# Initial SMS on script start if it has been an hour since the last SMS
+if time.time() - read_last_sms_info()[1] > 3600:  # 1 hour check
     client.sms.send_sms(['80112'], 'WEITER')
+    write_last_sms_info(read_last_sms_info()[0])
+    print("Initial WEITER message sent on script start.")
 
-#Inbox cleaning
+# Daily data usage reset check
+reset_data_usage(client)
+
+# Check data usage and send SMS based on thresholds
+check_data_usage_and_send_sms(client)
+
+# Clear the SMS inbox
+sms_list = client.sms.get_sms_list()
 for sms in sms_list['Messages']['Message']:
     if sms['Phone'] == '80112':
-        print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
         client.sms.delete_sms(sms['Index'])
+        print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
 
 # Logout at the end of the script
 try:
