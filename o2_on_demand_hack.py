@@ -58,6 +58,7 @@ def reset_data_usage(client):
 
     if today != last_clear_time_formatted:
         client.monitoring.set_clear_traffic()
+        write_last_sms_info(0);
         print("Data usage has been reset.")
     else:
         print("No reset needed, already cleared today.")
