@@ -71,7 +71,7 @@ def check_data_usage_and_send_sms(client):
     last_usage_gb = last_byte / (1024**3)  # Convert bytes to GB
     print(f"Last usage: {last_usage_gb:.2f} GB - {int((time.time()-last_time)/60)} min ago.")
 
-    if total_data >= last_byte + 2 * 10**9:  # Check for 2GB increase
+    if total_usage_gb >= last_usage_gb + 1.9:  # Check for 2GB increase
         client.sms.send_sms(['80112'], 'WEITER')
         write_last_sms_info(total_data)
         print("SMS sent due to 2GB data usage threshold exceeded.")
