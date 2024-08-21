@@ -86,9 +86,8 @@ check_data_usage_and_send_sms(client)
 # Clear the SMS inbox
 sms_list = client.sms.get_sms_list()
 for sms in sms_list['Messages']['Message']:
-    if sms['Phone'] == '80112':
-        client.sms.delete_sms(sms['Index'])
-        print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
+    client.sms.delete_sms(sms['Index'])
+    print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
 
 # Logout at the end of the script
 try:
