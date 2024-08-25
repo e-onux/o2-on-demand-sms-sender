@@ -85,9 +85,12 @@ check_data_usage_and_send_sms(client)
 
 # Clear the SMS inbox
 sms_list = client.sms.get_sms_list()
-for sms in sms_list['Messages']['Message']:
-    client.sms.delete_sms(sms['Index'])
-    print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
+if sms_list and 'Messages' in sms_list and 'Message' in sms_list['Messages']:
+    for sms in sms_list['Messages']['Message']:
+        client.sms.delete_sms(sms['Index'])
+        print(f"SMS Deleted: From: {sms['Phone']}, Message: {sms['Content']}")
+else:
+    print("No SMS messages found or error retrieving SMS list.")
 
 # Logout at the end of the script
 try:
