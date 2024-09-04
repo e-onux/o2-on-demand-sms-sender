@@ -58,7 +58,7 @@ def reset_data_usage(client):
 
     if today != last_clear_time_formatted:
         client.monitoring.set_clear_traffic()
-        write_last_sms_info(0);
+        write_last_sms_info(0)
         print("Data usage has been reset.")
     else:
         print("No reset needed, already cleared today.")
@@ -68,17 +68,19 @@ def check_data_usage_and_send_sms(client):
     total_data = int(month_stats['CurrentMonthDownload']) + int(month_stats['CurrentMonthUpload'])
     total_usage_gb = total_data / (1024**3)  # Convert bytes to GB
     print(f"Current usage: {total_usage_gb:.2f} GB")
+    # Daily data usage reset check
+    reset_data_usage(client)
     last_byte, last_time = read_last_sms_info()
     last_usage_gb = last_byte / (1024**3)  # Convert bytes to GB
     print(f"Last usage: {last_usage_gb:.2f} GB - {int((time.time()-last_time)/60)} min ago.")
+    if total_data < last_byte: # Check info file error
+        write_last_sms_info(0)
 
     if total_usage_gb >= last_usage_gb + 1.9:  # Check for 2GB increase
         client.sms.send_sms(['80112'], 'WEITER')
         write_last_sms_info(total_data)
         print("SMS sent due to 2GB data usage threshold exceeded.")
 
-# Daily data usage reset check
-reset_data_usage(client)
 
 # Check data usage and send SMS based on thresholds
 check_data_usage_and_send_sms(client)
