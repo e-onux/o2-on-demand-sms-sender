@@ -8,8 +8,8 @@ You can check here for supported Huawei LTE/5G modems: https://github.com/Salame
 
 1. **Clone the Repository:**
     ```bash
-    git clone https://github.com/e-onux/o2-on-demand-sms-sendery
-    cd O2-On-Demand-Hack
+    git clone https://github.com/e-onux/o2-on-demand-sms-sender
+    cd o2-on-demand-sms-sender
     ```
 
 2. **Set Up Python Environment:**
@@ -22,7 +22,7 @@ You can check here for supported Huawei LTE/5G modems: https://github.com/Salame
 3. **Install Requirements:**
     Install the required Python libraries:
     ```bash
-    pip install -r requirements.txt
+    venv/bin/pip install -r requirements.txt
     ```
 
 ## Configuration
@@ -42,7 +42,7 @@ You can check here for supported Huawei LTE/5G modems: https://github.com/Salame
 
 Run the script to interact with the modem:
 ```
-python o2_on_demand_hack.py
+venv/bin/python o2_on_demand_hack.py
 ```
 
 ## Contributing
