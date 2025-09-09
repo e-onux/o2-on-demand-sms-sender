@@ -31,4 +31,4 @@ jobs:
           file: ./Dockerfile
           platforms: linux/arm/v7,linux/arm64,linux/amd64
           push: true
-          tags: YOUR_DOCKERHUB_USER/o2-ondemand-sms:latest
+          tags: emironuk/o2-ondemand-sms:latest
