@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  o2-ondemand-sms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: YOUR_DOCKERHUB_USER/o2-ondemand-sms:latest
+    container_name: o2-ondemand-sms
+    environment:
+      # Set these via Portainer UI or an .env file
+      API_USER: ${API_USER}
+      API_PASSWORD: ${API_PASSWORD}
+      MODEM_HOST: ${MODEM_HOST:-192.168.8.1}
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-900}
+      TZ: ${TZ:-Europe/Berlin}
+    # Host network is the most reliable for reaching modem IPs like 192.168.8.1
+    network_mode: "host"
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
