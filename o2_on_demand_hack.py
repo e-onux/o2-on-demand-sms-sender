@@ -14,7 +14,14 @@ username = os.getenv('API_USER')
 password = os.getenv('API_PASSWORD')
 
 # Enter your modem's IP address and, if necessary, the port number here.
-url = 'http://192.168.8.1/'
+# Accept values like "192.168.8.1", "192.168.8.1:8080", "http://192.168.8.1"
+host = os.getenv("MODEM_HOST", "192.168.8.1")
+host = host.replace("http://", "").replace("https://", "").rstrip("/")
+
+port = os.getenv("MODEM_PORT")  # optional
+netloc = f"{host}:{port}" if port else host
+
+url = f"http://{netloc}/"  # base URL to your modem
 
 def attempt_login(max_retries=3):
     retries = 0
