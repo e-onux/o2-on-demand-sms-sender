@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   o2-ondemand-sms:
     build:
@@ -12,10 +10,21 @@ services:
       API_USER: ${API_USER}
       API_PASSWORD: ${API_PASSWORD}
       MODEM_HOST: ${MODEM_HOST:-192.168.8.1}
-      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-900}
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-60}
+      SMS_THRESHOLD_GB: ${SMS_THRESHOLD_GB:-1.9}
+      SMS_RETENTION_COUNT: ${SMS_RETENTION_COUNT:-3}
+      SMS_DATA_DIR: /app/data
       TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      # Persistent statistics and SMS history, shared with control_panel.py
+      - ./data:/app/data
     # Host network is the most reliable for reaching modem IPs like 192.168.8.1
     network_mode: "host"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
     labels:
       com.centurylinklabs.watchtower.enable: "true"

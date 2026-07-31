@@ -8,6 +8,11 @@ __pycache__/
 venv/
 .env
 .env.local
+data/
+gui/build/
+gui/.build-work/
+gui/.venv-build/
+gui/.venv-build-windows/
 
 # Git
 .git

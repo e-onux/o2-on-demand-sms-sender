@@ -1,0 +1,7 @@
+.venv-build/
+.venv-build-windows/
+.build-work/
+__pycache__/
+*.spec
+build/*
+!build/README.md

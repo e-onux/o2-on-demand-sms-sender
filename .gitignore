@@ -2,3 +2,6 @@
 venv/
 __pycache__/
 *.pyc
+data/
+last_sms_info.txt
+.DS_Store

@@ -1,0 +1,89 @@
+name: Build GUI applications
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "gui/**"
+      - "runtime_status.py"
+      - ".github/workflows/gui-build.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact: macos-arm64
+            output: gui/build/ci-macos-arm64
+            tray-backend: pystray._darwin
+          - os: ubuntu-24.04
+            artifact: linux-x86_64
+            output: gui/build/ci-linux-x86_64
+            tray-backend: pystray._xorg
+          - os: windows-2025
+            artifact: windows-x86_64
+            output: gui/build/ci-windows-x86_64
+            tray-backend: pystray._win32
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: gui/requirements-build.txt
+
+      - name: Install Tk on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xauth xvfb
+
+      - name: Install build requirements
+        run: python -m pip install --disable-pip-version-check -r gui/requirements-build.txt
+
+      - name: Build application
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile --windowed
+          --name O2SMSControlPanel --paths . --hidden-import runtime_status
+          --hidden-import "${{ matrix.tray-backend }}"
+          --distpath "${{ matrix.output }}" --workpath "gui/.build-work/ci-${{ runner.os }}"
+          --specpath "gui/.build-work/ci-${{ runner.os }}" gui/src/control_panel.py
+
+      - name: Ad-hoc sign macOS application
+        if: runner.os == 'macOS'
+        run: codesign --force --deep --sign - "${{ matrix.output }}/O2SMSControlPanel.app"
+
+      - name: Smoke-test macOS application
+        if: runner.os == 'macOS'
+        run: >-
+          "${{ matrix.output }}/O2SMSControlPanel.app/Contents/MacOS/O2SMSControlPanel"
+          --smoke-test --project-dir "${{ github.workspace }}"
+
+      - name: Smoke-test Linux application and tray
+        if: runner.os == 'Linux'
+        run: |
+          "${{ matrix.output }}/O2SMSControlPanel" --smoke-test --project-dir "${{ github.workspace }}"
+          O2_SMS_GUI_SMOKE_MARKER=/tmp/o2-sms-gui-smoke-ok timeout 20s \
+            xvfb-run -a "${{ matrix.output }}/O2SMSControlPanel" \
+            --gui-smoke-test --project-dir "${{ github.workspace }}" || \
+            test -s /tmp/o2-sms-gui-smoke-ok
+
+      - name: Smoke-test Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${{ matrix.output }}/O2SMSControlPanel.exe" --smoke-test --project-dir "${{ github.workspace }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload application
+        uses: actions/upload-artifact@v4
+        with:
+          name: o2-sms-control-panel-${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
