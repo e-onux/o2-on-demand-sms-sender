@@ -11,6 +11,7 @@ from gui.src.control_panel import (
     parse_compose_ps,
     project_dir_argument,
     read_recent_events,
+    tray_icon_is_visible,
 )
 from gui.src.i18n import LANGUAGES, translate, validate_translations
 from gui.src.platform_integration import enriched_subprocess_environment, set_start_at_login
@@ -120,6 +121,36 @@ class ControlPanelParsingTests(unittest.TestCase):
     def test_desktop_environment_includes_common_docker_cli_path(self):
         environment = enriched_subprocess_environment({"PATH": "/usr/bin:/bin"})
         self.assertIn("/usr/local/bin", environment["PATH"].split(os.pathsep))
+
+    def test_macos_tray_requires_a_visible_native_status_item(self):
+        class Button:
+            def __init__(self, hidden):
+                self.hidden = hidden
+
+            def isHidden(self):
+                return self.hidden
+
+        class StatusItem:
+            def __init__(self, hidden):
+                self._button = Button(hidden)
+
+            def button(self):
+                return self._button
+
+        class Icon:
+            visible = True
+
+            def __init__(self, hidden):
+                self._status_item = StatusItem(hidden)
+
+        self.assertFalse(tray_icon_is_visible(Icon(True), "darwin"))
+        self.assertTrue(tray_icon_is_visible(Icon(False), "darwin"))
+
+    def test_tray_is_unavailable_until_backend_reports_visible(self):
+        class Icon:
+            visible = False
+
+        self.assertFalse(tray_icon_is_visible(Icon(), "win32"))
 
     def test_linux_autostart_entry_launches_minimized_with_project_path(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

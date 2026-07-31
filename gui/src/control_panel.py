@@ -82,6 +82,8 @@ DATA_DIR = PROJECT_DIR / "data"
 STATUS_PATH = DATA_DIR / "status.json"
 EVENTS_PATH = DATA_DIR / "events.jsonl"
 MAX_GUI_LOG_LINES = 2000
+CONTROL_PANEL_LOG_PATH = DATA_DIR / "control_panel.log"
+MAX_CONTROL_PANEL_LOG_BYTES = 256 * 1024
 
 
 def read_json_object(path: Path) -> dict[str, Any]:
@@ -137,6 +139,39 @@ def format_decimal_gb_from_bytes(value: Any) -> str:
         return f"{int(value) / 1_000_000_000:.2f} GB"
     except (TypeError, ValueError):
         return "—"
+
+
+def tray_icon_is_visible(icon: Any, platform: str | None = None) -> bool:
+    """Return whether the tray backend and its native macOS item are visible."""
+    if icon is None or not bool(getattr(icon, "visible", False)):
+        return False
+    if (platform or sys.platform) != "darwin":
+        return True
+    try:
+        status_item = getattr(icon, "_status_item")
+        button = status_item.button()
+        return button is not None and not bool(button.isHidden())
+    except (AttributeError, TypeError):
+        return False
+
+
+def append_control_panel_diagnostic(message: str) -> None:
+    """Append a bounded diagnostic entry for failures that occur without a window."""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if (
+            CONTROL_PANEL_LOG_PATH.exists()
+            and CONTROL_PANEL_LOG_PATH.stat().st_size >= MAX_CONTROL_PANEL_LOG_BYTES
+        ):
+            os.replace(
+                CONTROL_PANEL_LOG_PATH,
+                CONTROL_PANEL_LOG_PATH.with_suffix(".log.1"),
+            )
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with CONTROL_PANEL_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"{timestamp} {message.rstrip()}\n")
+    except OSError:
+        pass
 
 
 def run_process(
@@ -257,6 +292,9 @@ class ControlPanel(tk.Tk):
         self.geometry("1180x780")
         self.minsize(980, 680)
         self.protocol("WM_DELETE_WINDOW", self._request_close)
+        if sys.platform == "darwin":
+            self.createcommand("tk::mac::ReopenApplication", self._show_window)
+            self.createcommand("tk::mac::Quit", self._quit_application)
 
         self._closing = False
         self._command_running = False
@@ -972,21 +1010,57 @@ class ControlPanel(tk.Tk):
 
                 pystray = pystray_module
         except Exception as error:  # Headless Linux and missing optional dependencies.
-            self._append_log(f"Tray initialization failed: {type(error).__name__}: {error}\n")
+            message = f"Tray initialization failed: {type(error).__name__}: {error}"
+            self._append_log(message + "\n")
+            append_control_panel_diagnostic(message)
             return
         try:
+            image = self._create_tray_image()
+            if image is None:
+                raise RuntimeError("tray image support is unavailable")
             self._tray_icon = pystray.Icon(
                 "o2-sms-control-panel",
-                self._create_tray_image(),
+                image,
                 self.t("app_title"),
                 self._tray_menu(),
             )
-            self._tray_icon.run_detached()
-            self._tray_available = True
+            if sys.platform == "darwin":
+                # pystray's default detached setup changes AppKit state from a
+                # worker thread. Tk already owns the macOS event loop, so make
+                # the native status item visible from Tk's main thread instead.
+                self._tray_icon.run_detached(setup=lambda _icon: None)
+                self.after_idle(self._activate_macos_tray_icon)
+            else:
+                self._tray_icon.run_detached()
+                self.after(100, self._refresh_tray_availability)
         except Exception as error:  # A missing desktop backend must not stop the GUI.
             self._tray_icon = None
             self._tray_available = False
-            self._append_log(f"Tray initialization failed: {type(error).__name__}: {error}\n")
+            message = f"Tray initialization failed: {type(error).__name__}: {error}"
+            self._append_log(message + "\n")
+            append_control_panel_diagnostic(message)
+
+    def _activate_macos_tray_icon(self) -> None:
+        if self._closing or self._tray_icon is None:
+            return
+        try:
+            self._tray_icon.visible = True
+            status_item = getattr(self._tray_icon, "_status_item")
+            button = status_item.button()
+            if button is not None:
+                button.setTitle_(" O₂")
+            self._refresh_tray_availability()
+            if not self._tray_available:
+                raise RuntimeError("the native macOS status item remained hidden")
+            append_control_panel_diagnostic("Tray icon is visible.")
+        except Exception as error:
+            self._tray_available = False
+            message = f"Tray activation failed: {type(error).__name__}: {error}"
+            self._append_log(message + "\n")
+            append_control_panel_diagnostic(message)
+
+    def _refresh_tray_availability(self) -> None:
+        self._tray_available = tray_icon_is_visible(self._tray_icon)
 
     def _rebuild_tray_menu(self) -> None:
         if self._tray_icon is None:
@@ -1008,8 +1082,8 @@ class ControlPanel(tk.Tk):
         self.iconify()
 
     def _request_close(self) -> None:
-        if self.close_to_tray_var.get() and self._tray_available:
-            self.withdraw()
+        if self.close_to_tray_var.get():
+            self._minimize_to_tray()
             return
         self._quit_application()
 
@@ -1041,9 +1115,12 @@ def main() -> None:
         print(f"The legacy status file could not be migrated: {error}")
     app = ControlPanel()
     if "--gui-smoke-test" in sys.argv:
-        exit_code = 0 if app._tray_available else 3
+        exit_code = 3
 
         def finish_gui_smoke_test() -> None:
+            nonlocal exit_code
+            app._refresh_tray_availability()
+            exit_code = 0 if app._tray_available else 3
             marker = os.getenv("O2_SMS_GUI_SMOKE_MARKER")
             if exit_code == 0 and marker:
                 Path(marker).write_text("ok\n", encoding="utf-8")
