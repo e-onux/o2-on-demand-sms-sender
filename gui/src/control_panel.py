@@ -7,9 +7,12 @@ import json
 import os
 import queue
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -21,9 +24,16 @@ from tkinter import messagebox, ttk
 
 def project_dir_argument(arguments: Sequence[str] | None = None) -> str | None:
     """Read --project-dir without taking ownership of the remaining arguments."""
+    return argument_value("--project-dir", arguments)
+
+
+def argument_value(
+    name: str, arguments: Sequence[str] | None = None
+) -> str | None:
+    """Read a named command-line value without parsing unrelated arguments."""
     values = list(sys.argv[1:] if arguments is None else arguments)
     try:
-        index = values.index("--project-dir")
+        index = values.index(name)
         return values[index + 1]
     except (ValueError, IndexError):
         return None
@@ -174,6 +184,115 @@ def append_control_panel_diagnostic(message: str) -> None:
         pass
 
 
+def create_tray_image():
+    """Create the cross-platform O2 tray image."""
+    if Image is None or ImageDraw is None:
+        return None
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((3, 8, 61, 52), radius=13, fill=(0, 96, 190, 255))
+    draw.polygon(((17, 50), (13, 61), (29, 51)), fill=(0, 96, 190, 255))
+    draw.text((20, 21), "O2", fill=(255, 255, 255, 255))
+    return image
+
+
+def process_is_alive(process_id: int) -> bool:
+    """Return whether a process still exists without changing it."""
+    try:
+        os.kill(process_id, 0)
+        return True
+    except (ProcessLookupError, ValueError):
+        return False
+    except PermissionError:
+        return True
+
+
+def run_macos_tray_helper(
+    parent_pid: int,
+    ready_path: Path,
+    language: str,
+) -> int:
+    """Run the macOS status item in its own native AppKit event loop."""
+    if sys.platform != "darwin":
+        return 2
+    try:
+        import AppKit
+        import pystray as pystray_module
+    except Exception as error:
+        append_control_panel_diagnostic(
+            f"Tray helper import failed: {type(error).__name__}: {error}"
+        )
+        return 3
+
+    image = create_tray_image()
+    if image is None:
+        append_control_panel_diagnostic("Tray helper image support is unavailable.")
+        return 3
+
+    native_app = AppKit.NSApplication.sharedApplication()
+    native_app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+    icon: Any = None
+
+    def signal_parent(signal_number: int) -> None:
+        try:
+            os.kill(parent_pid, signal_number)
+        except ProcessLookupError:
+            pass
+
+    def show_window(_icon, _item) -> None:
+        signal_parent(signal.SIGUSR1)
+
+    def quit_application(_icon, _item) -> None:
+        signal_parent(signal.SIGUSR2)
+        _icon.stop()
+
+    icon = pystray_module.Icon(
+        "o2-sms-control-panel",
+        image,
+        translate(language, "app_title"),
+        pystray_module.Menu(
+            pystray_module.MenuItem(
+                translate(language, "show_window"),
+                show_window,
+                default=True,
+            ),
+            pystray_module.MenuItem(
+                translate(language, "quit"),
+                quit_application,
+            ),
+        ),
+    )
+
+    # pystray normally changes AppKit visibility from its setup thread. This
+    # helper owns the native event loop, so initialize the status item on the
+    # main thread before entering that loop.
+    icon.visible = True
+    status_item = getattr(icon, "_status_item")
+    button = status_item.button()
+    if button is not None:
+        button.setTitle_(" O₂")
+    if not tray_icon_is_visible(icon, "darwin"):
+        append_control_panel_diagnostic("Tray helper native status item stayed hidden.")
+        return 4
+
+    ready_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_path.write_text("ready\n", encoding="utf-8")
+    append_control_panel_diagnostic("Tray helper is visible.")
+
+    def monitor_parent() -> None:
+        while process_is_alive(parent_pid):
+            time.sleep(0.5)
+        os._exit(0)
+
+    threading.Thread(target=monitor_parent, daemon=True).start()
+    icon._setup_thread = threading.current_thread()
+    try:
+        icon._run()
+    finally:
+        ready_path.unlink(missing_ok=True)
+    return 0
+
+
 def run_process(
     arguments: Sequence[str],
     *,
@@ -295,6 +414,7 @@ class ControlPanel(tk.Tk):
         if sys.platform == "darwin":
             self.createcommand("tk::mac::ReopenApplication", self._show_window)
             self.createcommand("tk::mac::Quit", self._quit_application)
+            self.bind("<Unmap>", self._handle_window_unmap, add="+")
 
         self._closing = False
         self._command_running = False
@@ -302,6 +422,8 @@ class ControlPanel(tk.Tk):
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._action_buttons: list[ttk.Button] = []
         self._tray_icon: Any = None
+        self._tray_process: subprocess.Popen[str] | None = None
+        self._tray_ready_path: Path | None = None
         self._tray_available = False
         self.close_to_tray_var = tk.BooleanVar(
             value=bool(self.settings.get("close_to_tray", True))
@@ -310,6 +432,16 @@ class ControlPanel(tk.Tk):
             value=bool(self.settings.get("start_at_login", False))
         )
         self.language_var = tk.StringVar(value=self.language)
+
+        if sys.platform == "darwin":
+            signal.signal(
+                signal.SIGUSR1,
+                lambda _number, _frame: self._messages.put(("tray_show", None)),
+            )
+            signal.signal(
+                signal.SIGUSR2,
+                lambda _number, _frame: self._messages.put(("tray_quit", None)),
+            )
 
         self._configure_styles()
         self._build_menu()
@@ -784,6 +916,10 @@ class ControlPanel(tk.Tk):
                 self._apply_external_status(payload)
             elif message_type == "command_result":
                 self._handle_command_result(payload)
+            elif message_type == "tray_show":
+                self._show_window()
+            elif message_type == "tray_quit":
+                self._quit_application()
         if not self._closing:
             self.after(100, self._drain_messages)
 
@@ -978,14 +1114,7 @@ class ControlPanel(tk.Tk):
             )
 
     def _create_tray_image(self):
-        if Image is None or ImageDraw is None:
-            return None
-        image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((3, 8, 61, 52), radius=13, fill=(0, 96, 190, 255))
-        draw.polygon(((17, 50), (13, 61), (29, 51)), fill=(0, 96, 190, 255))
-        draw.text((20, 21), "O2", fill=(255, 255, 255, 255))
-        return image
+        return create_tray_image()
 
     def _tray_menu(self):
         if pystray is None:
@@ -1004,6 +1133,9 @@ class ControlPanel(tk.Tk):
 
     def _start_tray_icon(self) -> None:
         global pystray
+        if sys.platform == "darwin":
+            self._start_macos_tray_helper()
+            return
         try:
             if pystray is None:
                 import pystray as pystray_module
@@ -1024,15 +1156,8 @@ class ControlPanel(tk.Tk):
                 self.t("app_title"),
                 self._tray_menu(),
             )
-            if sys.platform == "darwin":
-                # pystray's default detached setup changes AppKit state from a
-                # worker thread. Tk already owns the macOS event loop, so make
-                # the native status item visible from Tk's main thread instead.
-                self._tray_icon.run_detached(setup=lambda _icon: None)
-                self.after_idle(self._activate_macos_tray_icon)
-            else:
-                self._tray_icon.run_detached()
-                self.after(100, self._refresh_tray_availability)
+            self._tray_icon.run_detached()
+            self.after(100, self._refresh_tray_availability)
         except Exception as error:  # A missing desktop backend must not stop the GUI.
             self._tray_icon = None
             self._tray_available = False
@@ -1040,29 +1165,106 @@ class ControlPanel(tk.Tk):
             self._append_log(message + "\n")
             append_control_panel_diagnostic(message)
 
-    def _activate_macos_tray_icon(self) -> None:
-        if self._closing or self._tray_icon is None:
-            return
+    def _start_macos_tray_helper(self) -> None:
+        self._stop_macos_tray_helper()
+        ready_path = Path(tempfile.gettempdir()) / f"o2-sms-tray-{os.getpid()}.ready"
+        ready_path.unlink(missing_ok=True)
+        self._tray_ready_path = ready_path
+        if getattr(sys, "frozen", False):
+            command = [sys.executable]
+        else:
+            command = [sys.executable, str(Path(__file__).resolve())]
+        command.extend(
+            (
+                "--macos-tray-helper",
+                "--parent-pid",
+                str(os.getpid()),
+                "--tray-ready-file",
+                str(ready_path),
+                "--tray-language",
+                self.language,
+                "--project-dir",
+                str(PROJECT_DIR),
+            )
+        )
         try:
-            self._tray_icon.visible = True
-            status_item = getattr(self._tray_icon, "_status_item")
-            button = status_item.button()
-            if button is not None:
-                button.setTitle_(" O₂")
-            self._refresh_tray_availability()
-            if not self._tray_available:
-                raise RuntimeError("the native macOS status item remained hidden")
-            append_control_panel_diagnostic("Tray icon is visible.")
-        except Exception as error:
-            self._tray_available = False
-            message = f"Tray activation failed: {type(error).__name__}: {error}"
+            self._tray_process = subprocess.Popen(
+                command,
+                cwd=PROJECT_DIR,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                env=enriched_subprocess_environment(),
+            )
+            self.after(100, lambda: self._poll_macos_tray_helper(50))
+        except OSError as error:
+            self._tray_process = None
+            message = f"Tray helper failed to start: {type(error).__name__}: {error}"
             self._append_log(message + "\n")
             append_control_panel_diagnostic(message)
 
+    def _poll_macos_tray_helper(self, attempts_remaining: int) -> None:
+        if self._closing:
+            return
+        process = self._tray_process
+        ready_path = self._tray_ready_path
+        if process is None or ready_path is None:
+            self._tray_available = False
+            return
+        if ready_path.is_file() and process.poll() is None:
+            if not self._tray_available:
+                append_control_panel_diagnostic("Tray helper handshake completed.")
+            self._tray_available = True
+            return
+        if process.poll() is not None:
+            self._tray_available = False
+            message = f"Tray helper exited with code {process.returncode}."
+            self._append_log(message + "\n")
+            append_control_panel_diagnostic(message)
+            return
+        if attempts_remaining > 0:
+            self.after(
+                100,
+                lambda: self._poll_macos_tray_helper(attempts_remaining - 1),
+            )
+            return
+        self._tray_available = False
+        append_control_panel_diagnostic("Tray helper readiness timed out.")
+        self._stop_macos_tray_helper()
+
+    def _stop_macos_tray_helper(self) -> None:
+        process = self._tray_process
+        self._tray_process = None
+        self._tray_available = False
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        if self._tray_ready_path is not None:
+            self._tray_ready_path.unlink(missing_ok=True)
+        self._tray_ready_path = None
+
     def _refresh_tray_availability(self) -> None:
+        if sys.platform == "darwin":
+            process = self._tray_process
+            ready_path = self._tray_ready_path
+            self._tray_available = bool(
+                process is not None
+                and process.poll() is None
+                and ready_path is not None
+                and ready_path.is_file()
+            )
+            return
         self._tray_available = tray_icon_is_visible(self._tray_icon)
 
     def _rebuild_tray_menu(self) -> None:
+        if sys.platform == "darwin":
+            self._start_macos_tray_helper()
+            return
         if self._tray_icon is None:
             return
         self._tray_icon.title = self.t("app_title")
@@ -1070,16 +1272,51 @@ class ControlPanel(tk.Tk):
         self._tray_icon.update_menu()
 
     def _show_window(self) -> None:
+        self._set_macos_dock_visible(True)
         self.deiconify()
         self.lift()
         self.focus_force()
 
     def _minimize_to_tray(self) -> None:
+        self._refresh_tray_availability()
         if self._tray_available:
             self.withdraw()
+            self._set_macos_dock_visible(False)
             return
         self.footer_var.set(self.t("tray_unavailable"))
         self.iconify()
+
+    def _set_macos_dock_visible(self, visible: bool) -> None:
+        if sys.platform != "darwin":
+            return
+        if not visible and not self._tray_available:
+            return
+        try:
+            import AppKit
+
+            native_app = AppKit.NSApplication.sharedApplication()
+            policy = (
+                AppKit.NSApplicationActivationPolicyRegular
+                if visible
+                else AppKit.NSApplicationActivationPolicyAccessory
+            )
+            native_app.setActivationPolicy_(policy)
+            if visible:
+                native_app.activateIgnoringOtherApps_(True)
+        except Exception as error:
+            message = f"Dock policy update failed: {type(error).__name__}: {error}"
+            self._append_log(message + "\n")
+            append_control_panel_diagnostic(message)
+
+    def _handle_window_unmap(self, event: tk.Event) -> None:
+        if (
+            event.widget is self
+            and not self._closing
+            and self.close_to_tray_var.get()
+            and self._tray_available
+            and self.state() == "iconic"
+        ):
+            self.after_idle(self._minimize_to_tray)
 
     def _request_close(self) -> None:
         if self.close_to_tray_var.get():
@@ -1089,6 +1326,8 @@ class ControlPanel(tk.Tk):
 
     def _quit_application(self) -> None:
         self._closing = True
+        if sys.platform == "darwin":
+            self._stop_macos_tray_helper()
         if self._tray_icon is not None:
             self._tray_icon.stop()
         self.destroy()
@@ -1104,6 +1343,27 @@ def packaged_smoke_test() -> int:
 
 
 def main() -> None:
+    if "--macos-tray-helper" in sys.argv:
+        try:
+            parent_pid_value = argument_value("--parent-pid")
+            ready_path_value = argument_value("--tray-ready-file")
+            if parent_pid_value is None or ready_path_value is None:
+                raise ValueError("missing tray helper argument")
+            parent_pid = int(parent_pid_value)
+            ready_path = Path(ready_path_value)
+            language = argument_value("--tray-language") or "en"
+        except (TypeError, ValueError):
+            raise SystemExit(2)
+        if language not in LANGUAGES:
+            raise SystemExit(2)
+        try:
+            helper_exit_code = run_macos_tray_helper(parent_pid, ready_path, language)
+        except Exception as error:
+            append_control_panel_diagnostic(
+                f"Tray helper crashed: {type(error).__name__}: {error}"
+            )
+            helper_exit_code = 5
+        raise SystemExit(helper_exit_code)
     if "--smoke-test" in sys.argv:
         raise SystemExit(packaged_smoke_test())
     if "--docker-smoke-test" in sys.argv:
@@ -1114,19 +1374,83 @@ def main() -> None:
     except OSError as error:
         print(f"The legacy status file could not be migrated: {error}")
     app = ControlPanel()
+    if "--tray-lifecycle-smoke-test" in sys.argv:
+        lifecycle_exit_code = 3
+
+        def finish_tray_restore(hidden_ok: bool) -> None:
+            nonlocal lifecycle_exit_code
+            app.update_idletasks()
+            try:
+                import AppKit
+
+                dock_is_regular = (
+                    AppKit.NSApplication.sharedApplication().activationPolicy()
+                    == AppKit.NSApplicationActivationPolicyRegular
+                )
+            except Exception:
+                dock_is_regular = False
+            restored_ok = app.state() == "normal" and dock_is_regular
+            lifecycle_exit_code = 0 if hidden_ok and restored_ok else 4
+            marker = os.getenv("O2_SMS_GUI_SMOKE_MARKER")
+            if lifecycle_exit_code == 0 and marker:
+                Path(marker).write_text("ok\n", encoding="utf-8")
+            app._quit_application()
+
+        def exercise_tray_lifecycle(attempts_remaining: int = 100) -> None:
+            app._refresh_tray_availability()
+            if not app._tray_available and attempts_remaining > 0:
+                app.after(
+                    100,
+                    lambda: exercise_tray_lifecycle(attempts_remaining - 1),
+                )
+                return
+            if not app._tray_available:
+                app._quit_application()
+                return
+            app._minimize_to_tray()
+            app.update_idletasks()
+            try:
+                import AppKit
+
+                dock_is_accessory = (
+                    AppKit.NSApplication.sharedApplication().activationPolicy()
+                    == AppKit.NSApplicationActivationPolicyAccessory
+                )
+            except Exception:
+                dock_is_accessory = False
+            helper_is_running = bool(
+                app._tray_process is not None and app._tray_process.poll() is None
+            )
+            hidden_ok = (
+                app.state() == "withdrawn"
+                and dock_is_accessory
+                and helper_is_running
+            )
+            os.kill(os.getpid(), signal.SIGUSR1)
+            app.after(300, lambda: finish_tray_restore(hidden_ok))
+
+        app.after(100, exercise_tray_lifecycle)
+        app.mainloop()
+        raise SystemExit(lifecycle_exit_code)
     if "--gui-smoke-test" in sys.argv:
         exit_code = 3
 
-        def finish_gui_smoke_test() -> None:
+        def finish_gui_smoke_test(attempts_remaining: int = 100) -> None:
             nonlocal exit_code
             app._refresh_tray_availability()
+            if not app._tray_available and attempts_remaining > 0:
+                app.after(
+                    100,
+                    lambda: finish_gui_smoke_test(attempts_remaining - 1),
+                )
+                return
             exit_code = 0 if app._tray_available else 3
             marker = os.getenv("O2_SMS_GUI_SMOKE_MARKER")
             if exit_code == 0 and marker:
                 Path(marker).write_text("ok\n", encoding="utf-8")
             app._quit_application()
 
-        app.after(750, finish_gui_smoke_test)
+        app.after(100, finish_gui_smoke_test)
         app.mainloop()
         raise SystemExit(exit_code)
     app.mainloop()

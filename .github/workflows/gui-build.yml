@@ -59,11 +59,14 @@ jobs:
         if: runner.os == 'macOS'
         run: codesign --force --deep --sign - "${{ matrix.output }}/O2SMSControlPanel.app"
 
-      - name: Smoke-test macOS application
+      - name: Smoke-test macOS application and tray lifecycle
         if: runner.os == 'macOS'
-        run: >-
-          "${{ matrix.output }}/O2SMSControlPanel.app/Contents/MacOS/O2SMSControlPanel"
-          --smoke-test --project-dir "${{ github.workspace }}"
+        run: |
+          executable="${{ matrix.output }}/O2SMSControlPanel.app/Contents/MacOS/O2SMSControlPanel"
+          "$executable" --smoke-test --project-dir "${{ github.workspace }}"
+          O2_SMS_GUI_SMOKE_MARKER=/tmp/o2-sms-tray-lifecycle-ok \
+            "$executable" --tray-lifecycle-smoke-test --project-dir "${{ github.workspace }}"
+          test -s /tmp/o2-sms-tray-lifecycle-ok
 
       - name: Smoke-test Linux application and tray
         if: runner.os == 'Linux'

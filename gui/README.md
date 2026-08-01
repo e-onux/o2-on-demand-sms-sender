@@ -16,6 +16,13 @@ packaging scripts, and generated applications.
   menu.
 - Optionally start at user login in minimized mode.
 
+On macOS, the status item runs in a dedicated `UIElement` helper process with
+its own AppKit event loop. Hiding the main window switches it out of the Dock;
+the helper remains in the menu bar and signals the main process when the window
+or Quit command is selected. If the helper does not complete its readiness
+handshake, the application keeps a recoverable Dock window instead of hiding
+it completely.
+
 Preferences are stored in the operating system's per-user application settings
 directory. The startup integration uses a LaunchAgent on macOS, the current
 user's `Run` registry key on Windows, and an XDG autostart entry on Linux.
@@ -96,9 +103,13 @@ Exit code `0` means that the packaged Python runtime loaded and the required
 project files were found. Exit code `1` means that the project contract was not
 satisfied.
 
-Two additional build checks are available: `--docker-smoke-test` verifies that
-the packaged process can reach Docker Engine, while `--gui-smoke-test` creates
-the full translated window and tray integration, then exits automatically.
+Three additional build checks are available: `--docker-smoke-test` verifies
+that the packaged process can reach Docker Engine, while `--gui-smoke-test`
+creates the full translated window and tray integration, then exits
+automatically. On macOS, `--tray-lifecycle-smoke-test` also verifies the helper
+handshake, the `Regular → Accessory → Regular` Dock policy transition, the
+`normal → withdrawn → normal` window transition, and the restore signal. The
+macOS build script and CI workflow require this lifecycle test to pass.
 
 On macOS, a project under `Documents` is covered by Apple's privacy controls.
 The installed application may ask for Documents access once. Use the installed

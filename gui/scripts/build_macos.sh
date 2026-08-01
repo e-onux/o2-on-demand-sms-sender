@@ -38,4 +38,12 @@ fi
 /usr/bin/codesign --force --deep --sign - \
     "$output_dir/O2 SMS Kontrol Paneli.app"
 
+executable="$output_dir/O2 SMS Kontrol Paneli.app/Contents/MacOS/O2 SMS Kontrol Paneli"
+smoke_marker="$work_dir/tray-lifecycle-smoke.ok"
+rm -f "$smoke_marker"
+"$executable" --smoke-test --project-dir "$repo_root"
+O2_SMS_GUI_SMOKE_MARKER="$smoke_marker" \
+    "$executable" --tray-lifecycle-smoke-test --project-dir "$repo_root"
+test -s "$smoke_marker"
+
 print "macOS build ready: $output_dir/O2 SMS Kontrol Paneli.app"

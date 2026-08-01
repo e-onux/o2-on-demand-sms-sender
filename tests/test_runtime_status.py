@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gui.src.control_panel import (
+    argument_value,
     format_decimal_gb_from_bytes,
     parse_compose_ps,
     project_dir_argument,
@@ -117,6 +118,10 @@ class ControlPanelParsingTests(unittest.TestCase):
             "/tmp/project",
         )
         self.assertIsNone(project_dir_argument(["--minimized"]))
+
+    def test_named_argument_requires_a_following_value(self):
+        self.assertEqual(argument_value("--parent-pid", ["--parent-pid", "123"]), "123")
+        self.assertIsNone(argument_value("--parent-pid", ["--parent-pid"]))
 
     def test_desktop_environment_includes_common_docker_cli_path(self):
         environment = enriched_subprocess_environment({"PATH": "/usr/bin:/bin"})
