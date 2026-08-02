@@ -1,0 +1,73 @@
+# Technology radar - validated against standard/schemas/technology-radar.schema.json
+# Rings: adopt | trial | assess | hold | deprecate | replace
+version: "0.1"
+entries:
+  - name: Python 3.11+
+    category: language
+    ring: adopt
+    since: 2026-08-02
+    decision: ADR-0002
+    review:
+      interval: 12 months
+      next_review: 2027-08-02
+      triggers:
+        - end-of-life announced
+        - security-advisory
+  - name: huawei-lte-api
+    category: integration
+    ring: adopt
+    since: 2026-08-02
+    decision: ADR-0002
+    review:
+      interval: 6 months
+      next_review: 2027-02-02
+      triggers:
+        - modem firmware API changes
+        - dependency maintenance stalls
+        - security-advisory
+  - name: Docker Compose and supervisord
+    category: infrastructure
+    ring: adopt
+    since: 2026-08-02
+    decision: ADR-0003
+    review:
+      interval: 12 months
+      next_review: 2027-08-02
+      triggers:
+        - restart behavior becomes unreliable
+        - Docker deployment is removed
+  - name: Atomic JSON and bounded JSONL
+    category: datastore
+    ring: adopt
+    since: 2026-08-02
+    decision: ADR-0004
+    review:
+      interval: 12 months
+      next_review: 2027-08-02
+      triggers:
+        - multiple remote operators are required
+        - file-locking regressions appear
+        - state volume exceeds performance budgets
+  - name: Tkinter and PyInstaller
+    category: desktop-framework
+    ring: adopt
+    since: 2026-08-02
+    decision: ADR-0005
+    review:
+      interval: 6 months
+      next_review: 2027-02-02
+      triggers:
+        - supported operating-system packaging fails
+        - accessibility requirements change
+        - Python or Tcl/Tk support changes
+  - name: macOS AppKit UIElement tray helper
+    category: desktop-integration
+    ring: trial
+    since: 2026-08-02
+    decision: ADR-0005
+    review:
+      interval: 6 months
+      next_review: 2027-02-02
+      triggers:
+        - tray icon cannot restore the window
+        - macOS background-item policy changes

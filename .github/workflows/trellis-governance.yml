@@ -1,0 +1,58 @@
+name: Trellis governance
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Trellis toolchain
+        uses: actions/checkout@v7
+        with:
+          repository: e-onux/trellis
+          ref: f7f4d3cb4eaeaffbd7ad8d190f79fb155196b6a0
+          path: .trellis-toolchain
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: .trellis-toolchain/package-lock.json
+
+      - name: Install Trellis toolchain
+        working-directory: .trellis-toolchain
+        run: npm ci --ignore-scripts
+
+      - name: Audit Trellis contracts and evidence
+        run: node .trellis-toolchain/packages/cli/bin/trellis.js audit --root "$GITHUB_WORKSPACE"
+
+      - name: Scan committed files for secrets
+        run: node .trellis-toolchain/packages/cli/bin/trellis.js secret-scan --root "$GITHUB_WORKSPACE"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Tk runtime
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install runtime requirements
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run regression suite
+        run: python -m unittest discover -s tests -v

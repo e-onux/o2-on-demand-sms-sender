@@ -1,0 +1,45 @@
+# Quality gates - validated against standard/schemas/quality-gates.schema.json
+# `trellis audit` evaluates these; gates with enforced:true fail CI (non-zero exit).
+# Brownfield `light` preset: behavior and regression gates are enforced while adoption-only gates remain visible.
+version: "0.1"
+gates:
+  - id: contract
+    description: Every public capability has a contract that validates against the schema.
+    enforced: true
+    severity: error
+  - id: example
+    description: Every capability has at least one normal and one error scenario.
+    enforced: true
+    severity: error
+  - id: budget
+    description: Technical and semantic capability budgets are respected.
+    enforced: false
+    severity: warning
+  - id: extension-completeness
+    description: All required extension registration points are updated; no orphans.
+    enforced: false
+    severity: warning
+  - id: decision
+    description: New technology/architecture changes are recorded in an ADR.
+    enforced: false
+    severity: warning
+  - id: evidence
+    description: Critical decisions link to at least one source.
+    enforced: false
+    severity: warning
+  - id: drift
+    description: Code respects architecture invariants.
+    enforced: false
+    severity: warning
+  - id: user-visibility
+    description: Each capability is runnable in the test cockpit.
+    enforced: false
+    severity: warning
+  - id: regression
+    description: Previously-working capabilities still pass.
+    enforced: true
+    severity: error
+  - id: review-freshness
+    description: No ADR/source review is overdue.
+    enforced: false
+    severity: info

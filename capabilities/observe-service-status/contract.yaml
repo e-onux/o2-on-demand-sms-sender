@@ -1,0 +1,89 @@
+id: observe-service-status
+title: Observe worker and Docker service status
+owner: desktop-control-panel
+version: 1.0.0
+status: active
+
+intent:
+  description: Present current usage, renewal statistics, operational events, errors and bounded Docker logs in the localized desktop GUI.
+
+responsibility:
+  does:
+    - render integer byte counters as human-readable usage without changing their meaning
+    - show today's SMS count, last send time and reason, worker health and recent events
+    - copy or clear the local event history through explicit buttons
+    - fetch at most 200 recent Docker log lines on request
+  does_not:
+    - trigger a manual SMS merely to populate statistics
+    - parse human-readable sizes back into accounting values
+    - keep unbounded logs or event rows in memory
+    - own the worker's renewal decision
+
+inputs:
+  runtime_snapshot:
+    type: object
+    required: true
+  events:
+    type: array
+    required: true
+  locale:
+    type: enum
+    required: true
+    values: [en, de, pl, ru, tr]
+
+outputs:
+  view_model:
+    type: object
+  visible_event_count:
+    type: integer
+    minimum: 0
+  docker_log_line_count:
+    type: integer
+    minimum: 0
+    maximum: 200
+
+examples:
+  - name: Raw byte count is rendered without reinterpretation
+    input: { runtime_snapshot: { current_usage_bytes: 65536, today_sms_count: 0 }, events: [], locale: tr }
+    expected: { view_model: { today_usage: "0.00 GB", today_sms_count: "0" }, visible_event_count: 0, docker_log_line_count: 0 }
+  - name: Missing status file is reported
+    input: { runtime_snapshot: missing, events: [], locale: en }
+    expected_error: { code: STATUS_UNAVAILABLE }
+
+invariants:
+  - displayed usage derives only from integer byte fields
+  - opening or refreshing the GUI never sends an SMS
+  - event and Docker log views have explicit record limits
+
+dependencies:
+  internal: [record-runtime-status]
+  external: [Docker Compose]
+
+implementation: [gui/src/control_panel.py, gui/src/i18n.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 24
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  visual: recommended
+  performance: recommended
+  user_demo: required
+
+review:
+  interval: 6 months
+  next_review: 2027-02-02
+  triggers: [runtime schema changed, localization added, displayed usage mismatch, event cap changed]
+
+evidence: [source-docker-compose, source-tkinter-docs, source-project-regression-tests]
+decisions: [ADR-0003, ADR-0004, ADR-0005]

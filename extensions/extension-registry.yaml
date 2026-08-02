@@ -1,0 +1,26 @@
+# Extension registry - machine-readable extension contracts.
+# Validated against standard/schemas/extension-contract.schema.json. One entry per extension point.
+# `trellis extension validate` checks that every required_updates path exists (and scans for orphans).
+#
+# Starts empty so a fresh repo passes `trellis audit`. Uncomment / adapt the worked example below
+# (a payment-provider) when you add your first real extension point.
+contracts: []
+
+# --- worked example (copy into `contracts:` and adjust paths to your repo) ----------------------
+# contracts:
+#   - id: payment-provider
+#     title: Payment provider extension
+#     type: provider
+#     root: payments/providers
+#     registration:
+#       required_updates:
+#         - { path: payments/provider-registry.yaml, operation: add-provider, required: true }
+#         - { path: config/payment.schema.yaml, operation: add-config-schema, required: true }
+#         - { path: .env.example, operation: document-environment, required_if: extension.requires_environment }
+#         - { path: docs/payments/providers.md, operation: add-documentation, required: true }
+#         - { path: capabilities/payment-processing/contract.yaml, operation: update-capability, required: true }
+#         - { path: CHANGELOG.md, operation: add-entry, required: true }
+#     required_artifacts: [implementation, unit-tests, contract-tests, error-scenarios, configuration-example, user-documentation]
+#     removal:
+#       required_updates: [payments/provider-registry.yaml, config/payment.schema.yaml, .env.example, docs/payments/providers.md, capabilities/payment-processing/contract.yaml, CHANGELOG.md]
+#     validation: { command: trellis extension validate payment-provider }

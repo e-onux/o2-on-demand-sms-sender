@@ -1,0 +1,82 @@
+id: execute-manual-modem-actions
+title: Execute confirmed manual modem actions
+owner: modem-automation
+version: 1.0.0
+status: active
+
+intent:
+  description: Execute an operator-confirmed renewal SMS or SMS-storage cleanup and publish the result to runtime status.
+
+responsibility:
+  does:
+    - send WEITER to 80112 only after an explicit manual request
+    - clear supported modem SMS boxes only after an explicit manual request
+    - update the verified usage baseline and operational event after success
+  does_not:
+    - send arbitrary SMS bodies or destinations
+    - run destructive actions during automated smoke tests
+    - silently ignore modem failures
+
+inputs:
+  action:
+    type: enum
+    required: true
+    values: [send-renewal, clear-sms]
+  confirmed:
+    type: boolean
+    required: true
+
+outputs:
+  completed:
+    type: boolean
+  affected_count:
+    type: integer
+    minimum: 0
+  event_reason:
+    type: string
+
+examples:
+  - name: Confirmed manual renewal succeeds
+    input: { action: send-renewal, confirmed: true }
+    expected: { completed: true, affected_count: 1, event_reason: manual-renewal }
+  - name: Unconfirmed destructive action is rejected
+    input: { action: clear-sms, confirmed: false }
+    expected_error: { code: CONFIRMATION_REQUIRED }
+
+invariants:
+  - the manual renewal destination is always 80112 and the body is always WEITER
+  - no modem mutation occurs when confirmed is false
+  - every successful action appends one bounded operational event
+
+dependencies:
+  internal: [record-runtime-status]
+  external: [Huawei LTE modem, O2 SMS service]
+
+implementation: [modem_actions.py, o2_on_demand_hack.py, runtime_status.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 24
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  security: recommended
+  user_demo: required
+
+review:
+  interval: 3 months
+  next_review: 2026-11-02
+  triggers: [manual action set changed, confirmation flow changed, O2 service number changed]
+
+evidence: [source-operator-o2-message-requirement, source-huawei-lte-api, source-project-regression-tests]
+decisions: [ADR-0002, ADR-0004]

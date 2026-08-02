@@ -1,0 +1,91 @@
+id: retain-recent-sms
+title: Retain only the newest modem SMS messages
+owner: modem-automation
+version: 1.0.0
+status: active
+
+intent:
+  description: Keep modem SMS storage bounded by retaining the newest configured number across inbox and sent boxes.
+
+responsibility:
+  does:
+    - read inbox and sent messages from local and SIM storage with pagination
+    - order combined messages by timestamp with deterministic fallbacks
+    - delete every message older than the newest retention count
+  does_not:
+    - retain an unbounded SMS archive
+    - delete a kept message because another box uses the same numeric index
+    - expose credentials or full message history in runtime status
+
+inputs:
+  messages:
+    type: array
+    required: true
+    description: Messages with box, storage, index and timestamp identity.
+  keep_count:
+    type: integer
+    required: true
+    minimum: 0
+
+outputs:
+  kept_message_ids:
+    type: array
+  deleted_message_ids:
+    type: array
+  deletion_errors:
+    type: array
+
+examples:
+  - name: Keep newest three across boxes
+    input:
+      keep_count: 3
+      messages:
+        - { id: inbox-local-1, timestamp: "2026-08-02T10:00:00" }
+        - { id: sent-local-2, timestamp: "2026-08-02T11:00:00" }
+        - { id: inbox-sim-3, timestamp: "2026-08-02T12:00:00" }
+        - { id: sent-sim-4, timestamp: "2026-08-02T13:00:00" }
+    expected:
+      kept_message_ids: [sent-sim-4, inbox-sim-3, sent-local-2]
+      deleted_message_ids: [inbox-local-1]
+      deletion_errors: []
+  - name: Modem page read fails
+    input: { keep_count: 3, messages: invalid-page-response }
+    expected_error: { code: SMS_LIST_FAILED }
+
+invariants:
+  - kept message count never exceeds keep_count
+  - each message is identified by box storage and index together
+  - pagination and retained collections are bounded
+
+dependencies:
+  internal: []
+  external: [Huawei LTE modem]
+
+implementation: [o2_on_demand_hack.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 16
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  security: recommended
+  user_demo: recommended
+
+review:
+  interval: 3 months
+  next_review: 2026-11-02
+  triggers: [retention requirement changed, modem pagination changed, message identity collision]
+
+evidence: [source-operator-o2-message-requirement, source-huawei-lte-api, source-project-regression-tests]
+decisions: [ADR-0002, ADR-0003]

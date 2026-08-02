@@ -1,0 +1,140 @@
+# Bibliography - source records validated against standard/schemas/source.schema.json.
+sources:
+  - id: source-trellis-standard
+    title: Trellis repository governance standard
+    authors: [Trellis Framework contributors]
+    type: standard
+    url: https://github.com/e-onux/trellis
+    license: Apache-2.0
+    local_copy: null
+    supports: [ADR-0001]
+    relevance:
+      claim: Trellis defines repository-native capability contracts, ADRs, evidence, budgets and quality gates.
+      confidence: high
+      limitations:
+        - The project is pre-1.0 and its schemas may change.
+    last_verified: 2026-08-02
+    next_review: 2027-02-02
+
+  - id: source-huawei-lte-api
+    title: huawei-lte-api project documentation
+    authors: [Salamek and contributors]
+    type: official-documentation
+    url: https://github.com/Salamek/huawei-lte-api
+    license: LGPL-3.0
+    local_copy: null
+    supports: [ADR-0002, renew-highspeed-data, retain-recent-sms, execute-manual-modem-actions]
+    relevance:
+      claim: The package exposes Python clients for Huawei LTE modem traffic, SMS and authentication APIs.
+      confidence: high
+      limitations:
+        - Compatibility depends on the deployed modem model and firmware.
+    last_verified: 2026-08-02
+    next_review: 2027-02-02
+
+  - id: source-docker-compose
+    title: Docker Compose documentation
+    authors: [Docker, Inc.]
+    type: official-documentation
+    url: https://docs.docker.com/compose/
+    license: unknown
+    local_copy: null
+    supports: [ADR-0003, operate-docker-service, observe-service-status]
+    relevance:
+      claim: Docker Compose defines and operates multi-container applications through a declarative YAML model and lifecycle commands.
+      confidence: high
+      limitations:
+        - Desktop executable discovery and host-network behavior differ by platform.
+    last_verified: 2026-08-02
+    next_review: 2027-08-02
+
+  - id: source-python-file-locking
+    title: Python fcntl and msvcrt library documentation
+    authors: [Python Software Foundation]
+    type: official-documentation
+    url: https://docs.python.org/3/library/fcntl.html
+    license: PSF-2.0
+    local_copy: null
+    supports: [ADR-0004, record-runtime-status]
+    relevance:
+      claim: Python exposes platform locking primitives that can guard local state-file updates.
+      confidence: medium
+      limitations:
+        - The linked page documents POSIX fcntl; Windows uses the separately documented msvcrt implementation.
+    last_verified: 2026-08-02
+    next_review: 2027-08-02
+
+  - id: source-tkinter-docs
+    title: Python tkinter documentation
+    authors: [Python Software Foundation]
+    type: official-documentation
+    url: https://docs.python.org/3/library/tkinter.html
+    license: PSF-2.0
+    local_copy: null
+    supports: [ADR-0005, observe-service-status, manage-desktop-lifecycle]
+    relevance:
+      claim: Tkinter is Python's standard interface to the Tcl/Tk GUI toolkit.
+      confidence: high
+      limitations:
+        - Native appearance and event-loop integration vary by operating system.
+    last_verified: 2026-08-02
+    next_review: 2027-08-02
+
+  - id: source-pyinstaller-docs
+    title: PyInstaller manual
+    authors: [PyInstaller Development Team]
+    type: official-documentation
+    url: https://pyinstaller.org/en/stable/
+    license: GPL-2.0-or-later with bootloader exception
+    local_copy: null
+    supports: [ADR-0005, manage-desktop-lifecycle]
+    relevance:
+      claim: PyInstaller bundles Python applications and dependencies for distribution on the build platform.
+      confidence: high
+      limitations:
+        - Cross-platform artifacts must be produced on their target operating systems.
+    last_verified: 2026-08-02
+    next_review: 2027-02-02
+
+  - id: source-project-regression-tests
+    title: O2 SMS sender regression test suite
+    authors: [e-onux]
+    type: internal-evaluation
+    url: https://github.com/e-onux/o2-on-demand-sms-sender/tree/main/tests
+    license: repository license
+    local_copy: null
+    supports:
+      - ADR-0002
+      - ADR-0003
+      - ADR-0004
+      - ADR-0005
+      - renew-highspeed-data
+      - retain-recent-sms
+      - record-runtime-status
+      - execute-manual-modem-actions
+      - observe-service-status
+      - operate-docker-service
+      - manage-desktop-lifecycle
+    relevance:
+      claim: Synthetic tests exercise existing behavior without sending SMS, deleting a real inbox or mutating host startup state.
+      confidence: high
+      limitations:
+        - Tests cannot prove modem firmware compatibility or native tray behavior.
+    last_verified: 2026-08-02
+    next_review: 2026-11-02
+
+  - id: source-operator-o2-message-requirement
+    title: Operator-provided O2 renewal message and retention requirements
+    authors: [Project operator]
+    type: user-research
+    license: internal
+    local_copy: null
+    supports: [renew-highspeed-data, retain-recent-sms, execute-manual-modem-actions]
+    relevance:
+      claim: Exact supported 80-percent and exhausted notifications require one WEITER reply and a new verified baseline; only the newest three SMS messages should remain.
+      confidence: high
+      limitations:
+        - The requirement is conversation-derived and has not been independently archived or validated against an O2 public document.
+        - O2 may change message wording, sender details, service number or renewal policy.
+    last_verified: 2026-08-02
+    next_review: 2026-11-02

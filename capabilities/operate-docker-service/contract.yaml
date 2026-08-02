@@ -1,0 +1,81 @@
+id: operate-docker-service
+title: Operate the Docker service
+owner: desktop-control-panel
+version: 1.0.0
+status: active
+
+intent:
+  description: Let the operator pull, start, stop or restart the configured Docker Compose worker and observe the command result.
+
+responsibility:
+  does:
+    - resolve a usable Docker executable on supported desktop platforms
+    - run bounded Compose lifecycle commands from the project directory
+    - surface command progress, exit status and safe error details
+  does_not:
+    - manage unrelated Docker projects or containers
+    - delete volumes, images or user data
+    - hide Docker daemon or permission failures
+
+inputs:
+  action:
+    type: enum
+    required: true
+    values: [pull, start, stop, restart]
+  project_directory:
+    type: string
+    required: true
+
+outputs:
+  exit_code:
+    type: integer
+  service_state:
+    type: string
+  message:
+    type: string
+
+examples:
+  - name: Start worker service
+    input: { action: start, project_directory: /project }
+    expected: { exit_code: 0, service_state: running, message: service-started }
+  - name: Docker daemon is unavailable
+    input: { action: restart, project_directory: /project }
+    expected_error: { code: DOCKER_UNAVAILABLE }
+
+invariants:
+  - every command targets only the configured Compose project
+  - lifecycle commands never include volume or image deletion flags
+  - the GUI remains responsive while a command runs
+
+dependencies:
+  internal: [observe-service-status]
+  external: [Docker Compose]
+
+implementation: [gui/src/control_panel.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 24
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  security: recommended
+  user_demo: required
+
+review:
+  interval: 6 months
+  next_review: 2027-02-02
+  triggers: [Compose command changes, Docker path resolution fails, project scope changes]
+
+evidence: [source-docker-compose, source-project-regression-tests]
+decisions: [ADR-0003, ADR-0005]

@@ -1,0 +1,52 @@
+# Capability map - the machine-readable index of capabilities.
+version: "0.1"
+capabilities:
+  - id: renew-highspeed-data
+    status: active
+    owner: modem-automation
+    path: capabilities/renew-highspeed-data
+    depends_on: [record-runtime-status]
+    implementation: [o2_on_demand_hack.py]
+    tests: [tests/test_worker_usage.py]
+  - id: retain-recent-sms
+    status: active
+    owner: modem-automation
+    path: capabilities/retain-recent-sms
+    depends_on: []
+    implementation: [o2_on_demand_hack.py]
+    tests: [tests/test_worker_usage.py]
+  - id: record-runtime-status
+    status: active
+    owner: runtime-state
+    path: capabilities/record-runtime-status
+    depends_on: []
+    implementation: [runtime_status.py]
+    tests: [tests/test_runtime_status.py]
+  - id: execute-manual-modem-actions
+    status: active
+    owner: modem-automation
+    path: capabilities/execute-manual-modem-actions
+    depends_on: [record-runtime-status]
+    implementation: [modem_actions.py, o2_on_demand_hack.py, runtime_status.py]
+    tests: [tests/test_worker_usage.py]
+  - id: observe-service-status
+    status: active
+    owner: desktop-control-panel
+    path: capabilities/observe-service-status
+    depends_on: [record-runtime-status]
+    implementation: [gui/src/control_panel.py, gui/src/i18n.py]
+    tests: [tests/test_runtime_status.py]
+  - id: operate-docker-service
+    status: active
+    owner: desktop-control-panel
+    path: capabilities/operate-docker-service
+    depends_on: [observe-service-status]
+    implementation: [gui/src/control_panel.py]
+    tests: [tests/test_runtime_status.py]
+  - id: manage-desktop-lifecycle
+    status: active
+    owner: desktop-control-panel
+    path: capabilities/manage-desktop-lifecycle
+    depends_on: [observe-service-status]
+    implementation: [gui/src/control_panel.py, gui/src/platform_integration.py]
+    tests: [tests/test_runtime_status.py]

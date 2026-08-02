@@ -1,0 +1,107 @@
+id: renew-highspeed-data
+title: Renew O2 high-speed data
+owner: modem-automation
+version: 1.0.0
+status: active
+
+intent:
+  description: >
+    Send the free O2 renewal SMS when verified cycle usage reaches the threshold or when a supported exact O2
+    notification arrives, then begin a new cycle from a verified modem counter.
+
+responsibility:
+  does:
+    - calculate allowance-cycle usage from integer modem bytes and a persisted verified baseline
+    - send WEITER to 80112 at the configured threshold
+    - recognize the exact supported normalized O2 80-percent and exhausted notification texts
+    - process each operator trigger at most once and reset the baseline from a verified counter
+  does_not:
+    - infer byte usage from human-readable GUI strings
+    - match arbitrary SMS messages by substring
+    - request paid services or bypass operator policy
+    - manage Docker or render the desktop GUI
+
+inputs:
+  current_daily_bytes:
+    type: integer
+    required: true
+    minimum: 0
+  baseline_bytes:
+    type: integer
+    required: true
+    minimum: 0
+  threshold_bytes:
+    type: integer
+    required: true
+    minimum: 1
+  incoming_messages:
+    type: array
+    required: true
+    description: Normalized modem SMS records available during this check.
+
+outputs:
+  renewal_sent:
+    type: boolean
+  reason:
+    type: string
+  next_baseline_bytes:
+    type: integer
+    minimum: 0
+  processed_trigger_fingerprint:
+    type: string
+    description: Empty when no operator-message trigger was consumed.
+
+examples:
+  - name: Threshold crossing renews once
+    input: { current_daily_bytes: 2201170739, baseline_bytes: 161061273, threshold_bytes: 2040109466, incoming_messages: [] }
+    expected: { renewal_sent: true, reason: usage-threshold, next_baseline_bytes: 2201170739, processed_trigger_fingerprint: "" }
+  - name: Exact exhausted notification renews before threshold
+    input:
+      current_daily_bytes: 900000000
+      baseline_bytes: 100000000
+      threshold_bytes: 2040109466
+      incoming_messages:
+        - { index: 17, content: "Du hast Dein aktiviertes Highspeed-Datenvolumen verbraucht. Ab jetzt surfst Du bis zum Ende des Tages mit reduzierter Geschwindigkeit. Du möchtest mit Highspeed weitersurfen? Dann einfach mit WEITER auf diese SMS antworten, um kostenlos weitere 2 GB Highspeed-Datenvolumen abzurufen. Dein o2 Team" }
+    expected: { renewal_sent: true, reason: operator-exhausted-message, next_baseline_bytes: 900000000, processed_trigger_fingerprint: message-17 }
+  - name: Unverified counter is rejected
+    input: { current_daily_bytes: null, baseline_bytes: 100000000, threshold_bytes: 2040109466, incoming_messages: [] }
+    expected_error: { code: INVALID_COUNTER }
+
+invariants:
+  - cycle usage is never negative
+  - one message fingerprint causes at most one renewal action
+  - a successful renewal persists a baseline read from the modem after the trigger
+  - the renewal destination is always 80112 and the body is always WEITER
+
+dependencies:
+  internal: [record-runtime-status]
+  external: [Huawei LTE modem, O2 SMS service]
+
+implementation: [o2_on_demand_hack.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 16
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  security: recommended
+  user_demo: required
+
+review:
+  interval: 3 months
+  next_review: 2026-11-02
+  triggers: [O2 message text changed, renewal number changed, threshold policy changed, modem counter semantics changed]
+
+evidence: [source-operator-o2-message-requirement, source-huawei-lte-api, source-project-regression-tests]
+decisions: [ADR-0002, ADR-0003, ADR-0004]

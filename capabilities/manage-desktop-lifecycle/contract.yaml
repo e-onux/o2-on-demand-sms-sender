@@ -1,0 +1,93 @@
+id: manage-desktop-lifecycle
+title: Manage the desktop application lifecycle
+owner: desktop-control-panel
+version: 1.0.0
+status: active
+
+intent:
+  description: Provide localized packaged builds, login startup and a recoverable minimize/close-to-tray lifecycle on macOS, Windows and Linux.
+
+responsibility:
+  does:
+    - persist language, close behavior and login-start preferences
+    - minimize or close to a visible system tray or menu-bar owner when supported
+    - restore the main window from the tray helper
+    - package platform-native artifacts from native CI runners
+  does_not:
+    - hide the application without a supported restoration path
+    - request broad filesystem access when a narrower project path is sufficient
+    - embed modem renewal logic in the tray helper
+
+inputs:
+  platform:
+    type: enum
+    required: true
+    values: [macos, windows, linux]
+  close_behavior:
+    type: enum
+    required: true
+    values: [quit, minimize-to-tray]
+  start_at_login:
+    type: boolean
+    required: true
+  locale:
+    type: enum
+    required: true
+    values: [en, de, pl, ru, tr]
+
+outputs:
+  window_state:
+    type: string
+  tray_available:
+    type: boolean
+  startup_registration:
+    type: string
+  locale_applied:
+    type: string
+
+examples:
+  - name: macOS close-to-tray remains recoverable
+    input: { platform: macos, close_behavior: minimize-to-tray, start_at_login: true, locale: de }
+    expected: { window_state: hidden, tray_available: true, startup_registration: enabled-minimized, locale_applied: de }
+  - name: Tray helper cannot start
+    input: { platform: macos, close_behavior: minimize-to-tray, start_at_login: false, locale: en }
+    expected_error: { code: TRAY_UNAVAILABLE }
+
+invariants:
+  - a hidden main window always has a visible supported restoration path
+  - login startup honors the configured minimized state
+  - all visible labels use one of the five supported locale catalogs
+  - platform builds are produced on their target operating system
+
+dependencies:
+  internal: [observe-service-status]
+  external: [host startup API, host tray API]
+
+implementation: [gui/src/control_panel.py, gui/src/platform_integration.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 32
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  visual: recommended
+  user_demo: required
+
+review:
+  interval: 6 months
+  next_review: 2027-02-02
+  triggers: [platform packaging fails, tray restore fails, login policy changes, locale added]
+
+evidence: [source-tkinter-docs, source-pyinstaller-docs, source-project-regression-tests]
+decisions: [ADR-0005]

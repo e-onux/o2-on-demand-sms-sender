@@ -1,0 +1,86 @@
+id: record-runtime-status
+title: Record bounded runtime status
+owner: runtime-state
+version: 1.0.0
+status: active
+
+intent:
+  description: Persist worker snapshots, operational events and trigger fingerprints safely for concurrent host and container readers.
+
+responsibility:
+  does:
+    - atomically replace the current JSON status snapshot
+    - append and trim locked JSONL event history
+    - roll daily SMS counters at the local date boundary
+    - cap processed operator-trigger fingerprints
+  does_not:
+    - store modem credentials
+    - grow any history without a fixed bound
+    - act as a remote multi-user database
+
+inputs:
+  update:
+    type: object
+    required: true
+    description: Validated partial runtime fields and optional event data.
+  local_date:
+    type: date
+    required: true
+
+outputs:
+  snapshot:
+    type: object
+    description: Complete normalized current status.
+  event_count:
+    type: integer
+    minimum: 0
+  processed_trigger_count:
+    type: integer
+    minimum: 0
+
+examples:
+  - name: Successful SMS updates the current day
+    input: { update: { sms_sent: true, reason: usage-threshold }, local_date: "2026-08-02" }
+    expected: { snapshot: { today_sms_count: 1, last_sms_reason: usage-threshold }, event_count: 1, processed_trigger_count: 0 }
+  - name: Invalid persisted JSON is isolated
+    input: { update: { existing_status: "{" }, local_date: "2026-08-02" }
+    expected_error: { code: INVALID_STATUS_JSON }
+
+invariants:
+  - readers observe either the previous complete snapshot or the next complete snapshot
+  - event history contains at most 500 records
+  - processed trigger history contains at most 200 fingerprints
+  - a new local date starts its daily SMS count at zero
+
+dependencies:
+  internal: []
+  external: []
+
+implementation: [runtime_status.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 16
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  security: recommended
+  performance: recommended
+
+review:
+  interval: 6 months
+  next_review: 2027-02-02
+  triggers: [file corruption, lock failure, record cap changed, multiple workers introduced]
+
+evidence: [source-python-file-locking, source-project-regression-tests]
+decisions: [ADR-0004]
