@@ -1,16 +1,17 @@
 id: execute-manual-modem-actions
 title: Execute confirmed manual modem actions
 owner: modem-automation
-version: 1.0.0
+version: 1.1.0
 status: active
 
 intent:
-  description: Execute an operator-confirmed renewal SMS or SMS-storage cleanup and publish the result to runtime status.
+  description: Execute an operator-confirmed renewal SMS, SMS-storage cleanup or modem restart and publish the result to runtime status.
 
 responsibility:
   does:
     - send WEITER to 80112 only after an explicit manual request
     - clear supported modem SMS boxes only after an explicit manual request
+    - restart the modem only after an explicit manual request and confirmation
     - update the verified usage baseline and operational event after success
   does_not:
     - send arbitrary SMS bodies or destinations
@@ -21,7 +22,7 @@ inputs:
   action:
     type: enum
     required: true
-    values: [send-renewal, clear-sms]
+    values: [send-renewal, clear-sms, restart-modem]
   confirmed:
     type: boolean
     required: true
@@ -42,10 +43,14 @@ examples:
   - name: Unconfirmed destructive action is rejected
     input: { action: clear-sms, confirmed: false }
     expected_error: { code: CONFIRMATION_REQUIRED }
+  - name: Confirmed modem restart is requested once
+    input: { action: restart-modem, confirmed: true }
+    expected: { completed: true, affected_count: 1, event_reason: modem-restart }
 
 invariants:
   - the manual renewal destination is always 80112 and the body is always WEITER
   - no modem mutation occurs when confirmed is false
+  - one confirmed restart request invokes the modem reboot endpoint once
   - every successful action appends one bounded operational event
 
 dependencies:
@@ -76,7 +81,7 @@ verification:
 review:
   interval: 3 months
   next_review: 2026-11-02
-  triggers: [manual action set changed, confirmation flow changed, O2 service number changed]
+  triggers: [manual action set changed, confirmation flow changed, O2 service number changed, modem reboot endpoint changed]
 
 evidence: [source-operator-o2-message-requirement, source-huawei-lte-api, source-project-regression-tests]
 decisions: [ADR-0002, ADR-0004]

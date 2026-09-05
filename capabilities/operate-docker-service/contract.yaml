@@ -1,7 +1,7 @@
 id: operate-docker-service
 title: Operate the Docker service
 owner: desktop-control-panel
-version: 1.0.0
+version: 1.1.0
 status: active
 
 intent:
@@ -12,6 +12,8 @@ responsibility:
     - resolve a usable Docker executable on supported desktop platforms
     - run bounded Compose lifecycle commands from the project directory
     - surface command progress, exit status and safe error details
+    - disable Docker-dependent controls while the Docker engine is unavailable
+    - disable modem action controls unless the worker service is running
   does_not:
     - manage unrelated Docker projects or containers
     - delete volumes, images or user data
@@ -25,6 +27,14 @@ inputs:
   project_directory:
     type: string
     required: true
+  docker_engine_available:
+    type: boolean
+    required: false
+    description: Latest non-mutating Docker status probe result.
+  worker_service_running:
+    type: boolean
+    required: false
+    description: Whether the configured worker container is currently running.
 
 outputs:
   exit_code:
@@ -33,19 +43,31 @@ outputs:
     type: string
   message:
     type: string
+  button_states:
+    type: object
+    description: Enabled state for independent, Docker-dependent and running-service-dependent controls.
 
 examples:
   - name: Start worker service
     input: { action: start, project_directory: /project }
     expected: { exit_code: 0, service_state: running, message: service-started }
   - name: Docker daemon is unavailable
-    input: { action: restart, project_directory: /project }
-    expected_error: { code: DOCKER_UNAVAILABLE }
+    input: { action: restart, project_directory: /project, docker_engine_available: false, worker_service_running: false }
+    expected:
+      exit_code: 1
+      service_state: unavailable
+      message: docker-unavailable
+      button_states: { independent: true, docker: false, running_service: false }
+  - name: Compose project directory is invalid
+    input: { action: start, project_directory: /missing, docker_engine_available: true, worker_service_running: false }
+    expected_error: { code: COMPOSE_PROJECT_INVALID }
 
 invariants:
   - every command targets only the configured Compose project
   - lifecycle commands never include volume or image deletion flags
   - the GUI remains responsive while a command runs
+  - Docker-dependent controls are disabled until a successful engine probe completes
+  - modem mutation controls are enabled only when the Docker engine and worker service are both available
 
 dependencies:
   internal: [observe-service-status]
@@ -75,7 +97,7 @@ verification:
 review:
   interval: 6 months
   next_review: 2027-02-02
-  triggers: [Compose command changes, Docker path resolution fails, project scope changes]
+  triggers: [Compose command changes, Docker path resolution fails, project scope changes, engine-state detection changes]
 
 evidence: [source-docker-compose, source-project-regression-tests]
 decisions: [ADR-0003, ADR-0005]

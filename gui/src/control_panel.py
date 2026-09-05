@@ -344,6 +344,18 @@ def parse_compose_ps(output: str) -> list[dict[str, Any]]:
     return items
 
 
+def action_group_states(
+    docker_engine_available: bool,
+    worker_service_running: bool,
+) -> dict[str, bool]:
+    """Return enabled states for controls with external runtime dependencies."""
+    return {
+        "independent": True,
+        "docker": docker_engine_available,
+        "running_service": docker_engine_available and worker_service_running,
+    }
+
+
 def collect_external_status(language: str = "en") -> dict[str, Any]:
     status: dict[str, Any] = {}
 
@@ -421,6 +433,10 @@ class ControlPanel(tk.Tk):
         self._refresh_running = False
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._action_buttons: list[ttk.Button] = []
+        self._docker_action_buttons: list[ttk.Button] = []
+        self._running_service_action_buttons: list[ttk.Button] = []
+        self._docker_engine_available = False
+        self._worker_service_running = False
         self._tray_icon: Any = None
         self._tray_process: subprocess.Popen[str] | None = None
         self._tray_ready_path: Path | None = None
@@ -504,6 +520,8 @@ class ControlPanel(tk.Tk):
 
     def _build_ui(self) -> None:
         self._action_buttons = []
+        self._docker_action_buttons = []
+        self._running_service_action_buttons = []
         root = ttk.Frame(self, padding=18)
         self._root_frame = root
         root.pack(fill=tk.BOTH, expand=True)
@@ -524,18 +542,18 @@ class ControlPanel(tk.Tk):
         actions = ttk.LabelFrame(root, text=self.t("actions"), padding=10)
         actions.pack(fill=tk.X, pady=(0, 14))
         action_definitions = [
-            (self.t("update_start"), self._update_and_start),
-            (self.t("git_pull"), self._git_pull),
-            (self.t("image_pull"), self._image_pull),
-            (self.t("service_start"), self._start_service),
-            (self.t("service_stop"), self._stop_service),
-            (self.t("service_restart"), self._restart_service),
-            (self.t("logs_refresh"), self._load_logs),
-            (self.t("refresh_now"), self._manual_refresh),
+            (self.t("update_start"), self._update_and_start, "docker"),
+            (self.t("git_pull"), self._git_pull, "independent"),
+            (self.t("image_pull"), self._image_pull, "docker"),
+            (self.t("service_start"), self._start_service, "docker"),
+            (self.t("service_stop"), self._stop_service, "docker"),
+            (self.t("service_restart"), self._restart_service, "docker"),
+            (self.t("logs_refresh"), self._load_logs, "docker"),
+            (self.t("refresh_now"), self._manual_refresh, "independent"),
         ]
         for column in range(4):
             actions.columnconfigure(column, weight=1, uniform="actions")
-        for index, (label, callback) in enumerate(action_definitions):
+        for index, (label, callback, dependency) in enumerate(action_definitions):
             button = ttk.Button(actions, text=label, command=callback, style="Action.TButton")
             button.grid(
                 row=index // 4,
@@ -545,6 +563,8 @@ class ControlPanel(tk.Tk):
                 pady=(0 if index < 4 else 7, 0),
             )
             self._action_buttons.append(button)
+            if dependency == "docker":
+                self._docker_action_buttons.append(button)
 
         modem_actions = ttk.LabelFrame(root, text=self.t("modem_actions"), padding=10)
         modem_actions.pack(fill=tk.X, pady=(0, 14))
@@ -562,13 +582,22 @@ class ControlPanel(tk.Tk):
             style="Action.TButton",
         )
         clear_inbox_button.pack(side=tk.LEFT, padx=(0, 12))
+        restart_modem_button = ttk.Button(
+            modem_actions,
+            text=self.t("restart_modem"),
+            command=self._restart_modem,
+            style="Action.TButton",
+        )
+        restart_modem_button.pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(
             modem_actions,
             text=self.t("modem_note"),
             style="Subtle.TLabel",
             wraplength=650,
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._action_buttons.extend((manual_sms_button, clear_inbox_button))
+        modem_buttons = (manual_sms_button, clear_inbox_button, restart_modem_button)
+        self._action_buttons.extend(modem_buttons)
+        self._running_service_action_buttons.extend(modem_buttons)
 
         cards = ttk.Frame(root)
         cards.pack(fill=tk.X, pady=(0, 14))
@@ -650,6 +679,7 @@ class ControlPanel(tk.Tk):
         ttk.Label(root, textvariable=self.footer_var, style="Subtle.TLabel").pack(
             fill=tk.X, pady=(8, 0)
         )
+        self._update_action_button_states()
 
     def _create_card(self, parent: ttk.Frame, column: int, title: str, value: str) -> tk.StringVar:
         card = ttk.LabelFrame(parent, padding=12)
@@ -753,6 +783,8 @@ class ControlPanel(tk.Tk):
             return self.t("runtime_baseline_reset")
         if event_type == "sms_inbox_cleared":
             return self.t("runtime_inbox_cleared", count=int(event.get("deleted_sms_count", 0)))
+        if event_type == "modem_restarted":
+            return self.t("runtime_modem_restarted")
         if event_type == "sms_sent":
             trigger_code = event.get("trigger_code")
             if trigger_code == "highspeed_exhausted":
@@ -776,6 +808,7 @@ class ControlPanel(tk.Tk):
             "data_usage_reset": self.t("event_usage_reset"),
             "sms_baseline_reset": self.t("event_baseline_reset"),
             "sms_inbox_cleared": self.t("event_inbox_cleared"),
+            "modem_restarted": self.t("event_modem_restarted"),
             "manual_action_failed": self.t("event_manual_failed"),
         }
         for event in events:
@@ -825,18 +858,25 @@ class ControlPanel(tk.Tk):
 
         docker = status.get("docker", {})
         if not docker.get("ok"):
+            self._docker_engine_available = False
+            self._worker_service_running = False
             self.service_var.set(self.t("docker_unavailable"))
             self.service_label.configure(style="Stopped.TLabel")
+            self._update_action_button_states()
             return
+        self._docker_engine_available = True
         container = docker.get("container")
         if not container:
+            self._worker_service_running = False
             self.service_var.set(self.t("service_missing"))
             self.service_label.configure(style="Stopped.TLabel")
+            self._update_action_button_states()
             return
 
         state = str(container.get("State", "unknown")).lower()
         health = str(container.get("Health", "")).lower()
         detail = str(container.get("Status", "")).strip()
+        self._worker_service_running = state == "running"
         if state == "running":
             health_text = f" • {health}" if health else ""
             self.service_var.set(self.t("service_running", health=health_text, detail=detail))
@@ -844,6 +884,7 @@ class ControlPanel(tk.Tk):
         else:
             self.service_var.set(self.t("service_state", state=state, detail=detail))
             self.service_label.configure(style="Stopped.TLabel")
+        self._update_action_button_states()
 
     def _run_command_sequence(
         self,
@@ -902,9 +943,28 @@ class ControlPanel(tk.Tk):
         self.log_text.configure(state=tk.DISABLED)
 
     def _set_actions_enabled(self, enabled: bool) -> None:
-        state = tk.NORMAL if enabled else tk.DISABLED
+        if enabled:
+            self._update_action_button_states()
+            return
         for button in self._action_buttons:
-            button.configure(state=state)
+            button.configure(state=tk.DISABLED)
+
+    def _update_action_button_states(self) -> None:
+        if self._command_running:
+            self._set_actions_enabled(False)
+            return
+        states = action_group_states(
+            self._docker_engine_available,
+            self._worker_service_running,
+        )
+        for button in self._action_buttons:
+            button.configure(state=tk.NORMAL)
+        for button in self._docker_action_buttons:
+            button.configure(state=tk.NORMAL if states["docker"] else tk.DISABLED)
+        for button in self._running_service_action_buttons:
+            button.configure(
+                state=tk.NORMAL if states["running_service"] else tk.DISABLED
+            )
 
     def _drain_messages(self) -> None:
         while True:
@@ -1010,6 +1070,33 @@ class ControlPanel(tk.Tk):
                         "python",
                         "/app/modem_actions.py",
                         "clear-inbox",
+                    ],
+                    180,
+                )
+            ],
+        )
+
+    def _restart_modem(self) -> None:
+        confirmed = messagebox.askyesno(
+            self.t("restart_modem_title"),
+            self.t("restart_modem_confirm"),
+            icon="warning",
+        )
+        if not confirmed:
+            return
+        self._run_command_sequence(
+            self.t("op_restart_modem"),
+            [
+                (
+                    [
+                        "docker",
+                        "compose",
+                        "exec",
+                        "-T",
+                        "o2-ondemand-sms",
+                        "python",
+                        "/app/modem_actions.py",
+                        "restart-modem",
                     ],
                     180,
                 )

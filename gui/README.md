@@ -8,7 +8,10 @@ packaging scripts, and generated applications.
 - Pull, build, start, stop, and restart the Docker Compose service.
 - Display service health, current daily usage, SMS counts, the latest SMS
   reason, threshold state, recent events, and Docker logs.
-- Send a confirmed manual `WEITER` SMS and clear the modem SMS inbox.
+- Send a confirmed manual `WEITER` SMS, clear the modem SMS inbox, or restart
+  the modem after a dedicated warning prompt.
+- Disable Docker-dependent controls when Docker Engine is unavailable and
+  modem controls when the worker container is not running.
 - Copy or clear the bounded event history.
 - Switch the interface at runtime between Turkish, English, German, Polish,
   and Russian.

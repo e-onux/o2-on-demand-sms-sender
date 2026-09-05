@@ -410,6 +410,26 @@ def clear_sms_inbox_manually():
         logout(client)
 
 
+def restart_modem_manually():
+    """Request a modem reboot after confirmation in the desktop control panel."""
+    client = None
+    try:
+        client = attempt_login()
+        client.device.reboot()
+        status_store.mark_manual_action_completed("restart_modem")
+        status_store.append_event(
+            "modem_restarted",
+            "Modem restart was requested from the control panel.",
+        )
+        print("Modem restart requested successfully.")
+    except Exception as error:
+        status_store.mark_manual_action_failed("restart_modem", error)
+        print(f"Modem restart failed: {type(error).__name__}: {error}")
+        raise
+    finally:
+        logout(client)
+
+
 def main():
     client = None
     status_store.mark_check_started()
@@ -440,7 +460,7 @@ def cli():
         "action",
         nargs="?",
         default="run",
-        choices=("run", "send-sms", "clear-inbox"),
+        choices=("run", "send-sms", "clear-inbox", "restart-modem"),
         help="run the scheduled check or execute a manual modem action",
     )
     arguments = parser.parse_args()
@@ -449,6 +469,8 @@ def cli():
         send_manual_sms()
     elif arguments.action == "clear-inbox":
         clear_sms_inbox_manually()
+    elif arguments.action == "restart-modem":
+        restart_modem_manually()
     else:
         main()
 

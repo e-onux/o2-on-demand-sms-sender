@@ -80,8 +80,10 @@ The Tkinter control panel is located under `gui/`. It can:
 - update and operate the Docker Compose service;
 - show service health, verified daily usage, SMS statistics, thresholds,
   errors, recent events, and Docker logs;
-- send a confirmed manual `WEITER` SMS;
+- send a confirmed manual `WEITER` SMS or restart the modem after a separate warning;
 - clear the modem SMS inbox and copy or clear event history;
+- disable Docker-dependent controls while Docker Engine is unavailable, and
+  modem controls while the worker service is not running;
 - switch between Turkish, English, German, Polish, and Russian;
 - minimize to the system tray and optionally start minimized at user login.
 
@@ -103,7 +105,8 @@ venv/bin/python -m unittest discover -s tests -v
 
 The suite covers modem date parsing, verified counter resets, trigger
 idempotency, SMS retention, long-running event compaction, decimal usage
-display, translations, and desktop project discovery.
+display, translations, action availability, confirmation gates, and desktop
+project discovery.
 
 ## License
 

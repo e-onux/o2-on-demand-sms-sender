@@ -2,13 +2,13 @@
 
 ## Problem
 
-`gui/src/control_panel.py` is 1,460 lines and changes for three distinct reasons: status presentation, Docker
+`gui/src/control_panel.py` is 1,547 lines and changes for three distinct reasons: status presentation, Docker
 service orchestration and desktop lifecycle/tray preferences. It exceeds the backend capability default of 800
 lines and the semantic budget of one change reason. Adding more behavior to the module would increase drift.
 
 ## Evidence
 
-- source file size: 1,460 lines (budget 800)
+- source file size: 1,547 lines (budget 800)
 - distinct change reasons: 3 (budget 1)
 - capabilities represented: 3
 - domains touched: presentation/localization, Docker subprocesses, host startup/tray integration

@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gui.src.control_panel import (
+    ControlPanel,
+    action_group_states,
     argument_value,
     format_decimal_gb_from_bytes,
     parse_compose_ps,
@@ -87,6 +89,41 @@ class RuntimeStatusStoreTests(unittest.TestCase):
 
 
 class ControlPanelParsingTests(unittest.TestCase):
+    def test_engine_dependent_action_groups_follow_runtime_state(self):
+        self.assertEqual(
+            action_group_states(False, False),
+            {"independent": True, "docker": False, "running_service": False},
+        )
+        self.assertEqual(
+            action_group_states(True, False),
+            {"independent": True, "docker": True, "running_service": False},
+        )
+        self.assertEqual(
+            action_group_states(True, True),
+            {"independent": True, "docker": True, "running_service": True},
+        )
+
+    def test_modem_restart_requires_confirmation_before_command(self):
+        class PanelStub:
+            def __init__(self):
+                self.commands = []
+
+            def t(self, key):
+                return key
+
+            def _run_command_sequence(self, title, steps):
+                self.commands.append((title, steps))
+
+        panel = PanelStub()
+        with patch("gui.src.control_panel.messagebox.askyesno", return_value=False):
+            ControlPanel._restart_modem(panel)
+        self.assertEqual(panel.commands, [])
+
+        with patch("gui.src.control_panel.messagebox.askyesno", return_value=True):
+            ControlPanel._restart_modem(panel)
+        self.assertEqual(len(panel.commands), 1)
+        self.assertEqual(panel.commands[0][1][0][0][-1], "restart-modem")
+
     def test_daily_usage_uses_decimal_gb_from_canonical_bytes(self):
         self.assertEqual(format_decimal_gb_from_bytes(70379999878), "70.38 GB")
 

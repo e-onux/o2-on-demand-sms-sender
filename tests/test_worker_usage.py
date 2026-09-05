@@ -1,4 +1,5 @@
 import datetime
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,11 +75,21 @@ class FakeUser:
         self.logout_calls += 1
 
 
+class FakeDevice:
+    def __init__(self):
+        self.reboot_calls = 0
+
+    def reboot(self):
+        self.reboot_calls += 1
+        return "OK"
+
+
 class FakeClient:
     def __init__(self, responses):
         self.monitoring = FakeMonitoring(responses)
         self.sms = FakeSms()
         self.user = FakeUser()
+        self.device = FakeDevice()
 
 
 class PagingSms(FakeSms):
@@ -166,6 +177,32 @@ class WorkerUsageTests(unittest.TestCase):
         self.assertEqual(status["current_usage_bytes"], 150000000)
         self.assertEqual(status["baseline_usage_bytes"], 150000000)
         self.assertEqual(status["last_sms_usage_bytes"], 150000000)
+
+    def test_manual_modem_restart_records_one_confirmed_request(self):
+        client = FakeClient([AFTER_RESET_MONTH_STATS])
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data_dir = Path(temporary_directory)
+            store = RuntimeStatusStore(data_dir)
+            with patch.multiple(
+                worker,
+                status_store=store,
+                attempt_login=lambda: client,
+            ):
+                worker.restart_modem_manually()
+
+            status = store.load()
+            events = [
+                event
+                for event in store.events_path.read_text(encoding="utf-8").splitlines()
+                if event
+            ]
+
+        self.assertEqual(client.device.reboot_calls, 1)
+        self.assertEqual(client.user.logout_calls, 1)
+        self.assertEqual(status["last_manual_action"], "restart_modem")
+        self.assertEqual(status["last_manual_action_status"], "ok")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(json.loads(events[0])["event_type"], "modem_restarted")
 
     def test_no_sms_when_reset_cannot_be_verified(self):
         client = FakeClient([REAL_STALE_MONTH_STATS] * 5)
