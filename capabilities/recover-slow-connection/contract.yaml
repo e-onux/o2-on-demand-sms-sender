@@ -1,0 +1,102 @@
+id: recover-slow-connection
+title: Recover a slow connection with escalating, rate-limited actions
+owner: modem-automation
+version: 1.0.0
+status: active
+
+intent:
+  description: >
+    Detect a sustained slow mobile connection from latency, loss and a small download probe, then try the
+    renewal SMS once and restart the modem only on an escalating, capped schedule so a day of poor radio
+    conditions cannot cause a restart loop.
+
+responsibility:
+  does:
+    - time a small HTTP request every worker run without ICMP privileges
+    - treat probes that fail outright as "unknown" so a local network fault never restarts the modem
+    - run a small download probe on a fixed interval, and every run only while confirming an episode
+    - judge slowness against an absolute minimum raised to a fraction of the line's usual healthy speed
+    - send WEITER once per slow episode, re-measure after a short wait, then restart the modem if still slow
+    - space restarts by an escalating backoff and a rolling 24-hour cap, resetting only after sustained recovery
+    - persist its state before executing an action so a failing action is never retried in a tight loop
+    - keep a bounded latency/speed history for the GUI chart
+  does_not:
+    - call the modem API itself (the worker executes the returned action)
+    - change the usage-threshold or operator-message renewal behavior
+    - run unbounded or high-volume speed tests
+
+inputs:
+  sample:
+    type: object
+    required: true
+    description: "{ping_ms, loss_percent, speed_measured, download_mbps} from this run."
+  state:
+    type: object
+    required: true
+    description: Persisted watchdog phase, restart history and healthy speed history.
+  now:
+    type: number
+    required: true
+
+outputs:
+  action:
+    type: enum
+    values: [none, send_sms, restart_modem]
+  verdict:
+    type: enum
+    values: [ok, slow, unknown]
+  next_action_at:
+    type: number
+
+examples:
+  - name: Confirmed slowness sends SMS first, restarts two minutes later
+    input: { samples_per_minute: [slow, slow, slow, slow], state: healthy }
+    expected: { actions: [none, send_sms, none, restart_modem], next_action_after_seconds: 1800 }
+  - name: A full slow day follows the ladder and the daily cap
+    input: { samples_per_minute: "48 h slow" }
+    expected: { restarts_at: ["00:03", "00:33", "03:33", "09:33", "24:03"], sms_count: 1 }
+  - name: Failed probes (container DNS down) never act
+    input: { samples_per_minute: "10 h of failed probes" }
+    expected: { actions: [], phase: healthy }
+  - name: A reboot call that raises is not retried every minute
+    input: { samples_per_minute: "10 x slow", reboot_raises: true }
+    expected_error: { code: REBOOT_FAILED, reboot_calls: 1 }
+
+invariants:
+  - at most one WEITER SMS per slow episode from this capability
+  - restart gaps inside one episode never shrink and no more than max_restarts_per_day happen in any 24 hours
+  - the escalation ladder resets only after recovery_seconds of continuously healthy probes
+  - a slow verdict never lowers the healthy-speed baseline
+  - network history holds at most 1,440 samples
+
+dependencies:
+  internal: [record-runtime-status, renew-highspeed-data]
+  external: [Huawei LTE modem, public internet probe endpoints]
+
+implementation: [connection_watchdog.py, o2_on_demand_hack.py]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 16
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  property_based: recommended
+  regression: required
+  integration: recommended
+  user_demo: required
+
+review:
+  interval: 3 months
+  next_review: 2027-01-06
+  triggers: [false restarts reported, speed-test endpoint changed or blocked, data-volume cost of probes questioned, modem reboot endpoint changed]
+
+evidence: [source-operator-slow-connection-requirement, source-cloudflare-speed-test, source-project-regression-tests]
+decisions: [ADR-0006]

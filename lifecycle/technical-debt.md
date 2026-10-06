@@ -5,5 +5,5 @@ that should force action (often a budget breach).
 
 | ID | Where | Description | Trigger to address | Severity |
 |---|---|---|---|---|
-| TD-001 | observe-service-status, operate-docker-service, manage-desktop-lifecycle | `gui/src/control_panel.py` combines rendering, Docker orchestration and desktop lifecycle in 1,547 lines. See RP-001. | Next structural GUI change or another regression caused by cross-responsibility coupling | high |
+| TD-001 | observe-service-status, operate-docker-service, manage-desktop-lifecycle | `gui/src/control_panel.py` combines rendering, Docker orchestration and desktop lifecycle in about 1,600 lines (the network chart lives in its own `network_chart.py`). See RP-001. | Next structural GUI change or another regression caused by cross-responsibility coupling | high |
 | TD-002 | ADR-0002, ADR-0005 | The original dependency/framework comparison is absent from repository history. | Dependency replacement, framework migration or next ADR review | medium |

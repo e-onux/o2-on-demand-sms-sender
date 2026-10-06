@@ -13,6 +13,7 @@ responsibility:
     - show today's SMS count, last send time and reason, worker health and recent events
     - copy or clear the local event history through explicit buttons
     - fetch at most 200 recent Docker log lines on request
+    - chart the bounded latency/download history and show the slow-connection watchdog phase
   does_not:
     - trigger a manual SMS merely to populate statistics
     - parse human-readable sizes back into accounting values
@@ -59,7 +60,7 @@ dependencies:
   internal: [record-runtime-status]
   external: [Docker Compose]
 
-implementation: [gui/src/control_panel.py, gui/src/i18n.py]
+implementation: [gui/src/control_panel.py, gui/src/i18n.py, gui/src/network_chart.py]
 
 budgets:
   max_files: 12
@@ -86,4 +87,4 @@ review:
   triggers: [runtime schema changed, localization added, displayed usage mismatch, event cap changed]
 
 evidence: [source-docker-compose, source-tkinter-docs, source-project-regression-tests]
-decisions: [ADR-0003, ADR-0004, ADR-0005]
+decisions: [ADR-0003, ADR-0004, ADR-0005, ADR-0006]

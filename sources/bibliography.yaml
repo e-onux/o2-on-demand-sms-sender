@@ -115,6 +115,8 @@ sources:
       - observe-service-status
       - operate-docker-service
       - manage-desktop-lifecycle
+      - recover-slow-connection
+      - ADR-0006
     relevance:
       claim: Synthetic tests exercise existing behavior without sending SMS, deleting a real inbox or mutating host startup state.
       confidence: high
@@ -138,3 +140,37 @@ sources:
         - O2 may change message wording, sender details, service number or renewal policy.
     last_verified: 2026-08-02
     next_review: 2026-11-02
+
+  - id: source-operator-slow-connection-requirement
+    title: Operator-provided slow-connection recovery requirement
+    authors: [Project operator]
+    type: user-research
+    license: internal
+    local_copy: null
+    supports: [ADR-0006, recover-slow-connection]
+    relevance:
+      claim: >
+        Restarting the modem often fixes network-side slowdowns; first try one SMS, restart if still slow after
+        two minutes, then back off (30 min, 3 h, 6 h, ...) because rainy days can keep the line poor all day.
+        Measured on 2026-10-06 during a reported slowdown - TCP connect about 30 ms, download about 10 Mbit/s.
+      confidence: medium
+      limitations:
+        - Conversation-derived; the usual healthy speed of the line was not measured in the same session.
+    last_verified: 2026-10-06
+    next_review: 2027-01-06
+
+  - id: source-cloudflare-speed-test
+    title: Cloudflare speed test download endpoint
+    authors: [Cloudflare, Inc.]
+    type: official-documentation
+    url: https://speed.cloudflare.com/
+    license: unknown
+    local_copy: null
+    supports: [ADR-0006, recover-slow-connection]
+    relevance:
+      claim: speed.cloudflare.com/__down?bytes=N returns N bytes for throughput measurement.
+      confidence: medium
+      limitations:
+        - Undocumented as a stable public API; the URL is configurable through WATCHDOG_SPEED_URL.
+    last_verified: 2026-10-06
+    next_review: 2027-01-06

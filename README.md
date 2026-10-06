@@ -28,6 +28,29 @@ three messages are retained by default. Runtime event history, processed
 fingerprints, Docker logs, and the GUI log view are all bounded for long-running
 installations.
 
+### Slow-connection recovery
+
+The worker also watches the connection itself. Every run times a tiny HTTP
+request to a few public connectivity-check endpoints; a 1 MB download probe runs
+every 15 minutes (about 100 MB/day) and on every run while a slowdown is being
+confirmed. A probe counts as slow below 5 Mbit/s, or below 35% of the line's
+usual healthy speed once enough history exists; very high latency also counts.
+Probes that fail outright (DNS or routing errors inside Docker, for example)
+never trigger an action, because a modem restart cannot fix them; the control
+panel shows "cannot measure" instead.
+
+When the connection stays slow, recovery escalates instead of looping:
+
+1. two slow measurements in a row: send `WEITER` once;
+2. still slow two minutes later: restart the modem;
+3. further restarts only after 30 min, 3 h, 6 h, 12 h, then 24 h, and never
+   more than 4 restarts in any 24 hours.
+
+The ladder resets only after an hour of healthy probes, so a rainy day with a
+weak signal costs at most a few restarts. The control panel charts latency and
+download speed for the last 1, 6 or 24 hours and shows the current phase. Set
+`WATCHDOG_ENABLED=false` to turn the feature off; the SMS renewal is unaffected.
+
 ## Configuration
 
 Copy the example environment file and add the modem credentials:
@@ -46,7 +69,22 @@ INTERVAL_SECONDS=60
 SMS_THRESHOLD_GB=1.9
 SMS_RETENTION_COUNT=3
 TZ=Europe/Berlin
+
+# Slow-connection recovery (defaults shown)
+WATCHDOG_ENABLED=true
+WATCHDOG_MIN_DOWNLOAD_MBPS=5
+WATCHDOG_RELATIVE_SLOW_FACTOR=0.35
+WATCHDOG_SLOW_PING_MS=400
+WATCHDOG_SPEED_INTERVAL_SECONDS=900
+WATCHDOG_SMS_WAIT_SECONDS=120
+WATCHDOG_RESTART_BACKOFF_MINUTES=30,180,360,720,1440
+WATCHDOG_RECOVERY_SECONDS=3600
+WATCHDOG_MAX_RESTARTS_PER_DAY=4
 ```
+
+Advanced: `WATCHDOG_PING_TARGETS` (default
+`cp.cloudflare.com/generate_204,connectivitycheck.gstatic.com/generate_204,www.msftconnecttest.com/connecttest.txt`),
+`WATCHDOG_SPEED_URL`, `WATCHDOG_SPEED_BYTES`, `WATCHDOG_CONFIRM_COUNT`.
 
 ## Run with Docker Compose
 
@@ -80,6 +118,8 @@ The Tkinter control panel is located under `gui/`. It can:
 - update and operate the Docker Compose service;
 - show service health, verified daily usage, SMS statistics, thresholds,
   errors, recent events, and Docker logs;
+- chart connection latency and download speed and show the slow-connection
+  recovery phase;
 - send a confirmed manual `WEITER` SMS or restart the modem after a separate warning;
 - clear the modem SMS inbox and copy or clear event history;
 - disable Docker-dependent controls while Docker Engine is unavailable, and
@@ -105,7 +145,7 @@ venv/bin/python -m unittest discover -s tests -v
 
 The suite covers modem date parsing, verified counter resets, trigger
 idempotency, SMS retention, long-running event compaction, decimal usage
-display, translations, action availability, confirmation gates, and desktop
+display, slow-connection escalation and its daily cap, translations, action availability, confirmation gates, and desktop
 project discovery.
 
 ## License

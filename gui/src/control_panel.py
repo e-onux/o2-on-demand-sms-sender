@@ -72,6 +72,7 @@ if str(PROJECT_DIR) not in sys.path:
 
 from runtime_status import RuntimeStatusStore  # noqa: E402
 from gui.src.i18n import LANGUAGES, translate  # noqa: E402
+from gui.src.network_chart import NetworkChart  # noqa: E402
 from gui.src.platform_integration import (  # noqa: E402
     enriched_subprocess_environment,
     load_settings,
@@ -91,6 +92,7 @@ pystray: Any = None
 DATA_DIR = PROJECT_DIR / "data"
 STATUS_PATH = DATA_DIR / "status.json"
 EVENTS_PATH = DATA_DIR / "events.jsonl"
+NETWORK_HISTORY_PATH = DATA_DIR / "network_history.json"
 MAX_GUI_LOG_LINES = 2000
 CONTROL_PANEL_LOG_PATH = DATA_DIR / "control_panel.log"
 MAX_CONTROL_PANEL_LOG_BYTES = 256 * 1024
@@ -126,6 +128,50 @@ def read_recent_events(path: Path, limit: int = 100) -> list[dict[str, Any]]:
     return events
 
 
+def read_network_history(path: Path) -> list[dict[str, Any]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+    return [item for item in value if isinstance(item, dict)][-1440:] if isinstance(value, list) else []
+
+
+WATCHDOG_EVENT_KEYS = (
+    "connection_slow_sms",
+    "modem_auto_restarted",
+    "connection_recovered",
+    "restart_limit_reached",
+    "watchdog_failed",
+)
+
+
+def connection_status_text(status: dict[str, Any], t: Any) -> str:
+    """Describe the slow-connection watchdog phase in one line."""
+    state = status.get("connection_watchdog")
+    if not isinstance(state, dict):
+        return t("conn_unknown")
+    phase = state.get("phase")
+    next_action_at = state.get("next_action_at")
+    next_text = (
+        datetime.fromtimestamp(float(next_action_at)).strftime("%d.%m %H:%M")
+        if isinstance(next_action_at, (int, float))
+        else "-"
+    )
+    if status.get("connection_probe_ok") is False and phase == "healthy":
+        return t("conn_unmeasured")
+    if phase == "degraded":
+        return t("conn_degraded")
+    if phase == "sms_wait":
+        return t("conn_sms_wait", time=next_text)
+    if phase == "restart_wait":
+        return t(
+            "conn_restart_wait",
+            count=int(state.get("episode_restart_count") or 0),
+            time=next_text,
+        )
+    return t("conn_healthy")
+
+
 def format_timestamp(
     value: Any,
     empty_text: str = "Not yet",
@@ -148,7 +194,7 @@ def format_decimal_gb_from_bytes(value: Any) -> str:
     try:
         return f"{int(value) / 1_000_000_000:.2f} GB"
     except (TypeError, ValueError):
-        return "—"
+        return "-"
 
 
 def tray_icon_is_visible(icon: Any, platform: str | None = None) -> bool:
@@ -607,7 +653,7 @@ class ControlPanel(tk.Tk):
         self.last_sms_var = self._create_card(cards, 0, self.t("last_sms"), self.t("never"))
         self.today_sms_var = self._create_card(cards, 1, self.t("today_sent"), "0")
         self.total_sms_var = self._create_card(cards, 2, self.t("total_sent"), "0")
-        self.usage_var = self._create_card(cards, 3, self.t("today_usage"), "—")
+        self.usage_var = self._create_card(cards, 3, self.t("today_usage"), "-")
         self.last_check_var = self._create_card(cards, 4, self.t("last_check"), self.t("never"))
 
         details = ttk.LabelFrame(root, text=self.t("current_details"), padding=10)
@@ -617,9 +663,15 @@ class ControlPanel(tk.Tk):
         self.check_result_var = self._detail_row(details, 1, self.t("last_result"))
         self.threshold_var = self._detail_row(details, 2, self.t("threshold_status"))
         self.error_var = self._detail_row(details, 3, self.t("last_error"))
+        self.connection_var = self._detail_row(details, 4, self.t("connection_status"))
 
         panes = ttk.Panedwindow(root, orient=tk.VERTICAL)
         panes.pack(fill=tk.BOTH, expand=True)
+
+        chart_frame = ttk.LabelFrame(panes, text=self.t("network_chart"), padding=8)
+        panes.add(chart_frame, weight=2)
+        self.network_chart = NetworkChart(chart_frame, self.t)
+        self.network_chart.pack(fill=tk.BOTH, expand=True)
 
         events_frame = ttk.LabelFrame(panes, text=self.t("recent_events"), padding=8)
         panes.add(events_frame, weight=3)
@@ -695,7 +747,7 @@ class ControlPanel(tk.Tk):
         ttk.Label(parent, text=title, style="Subtle.TLabel").grid(
             row=row, column=0, sticky=tk.NW, padx=(0, 10), pady=2
         )
-        variable = tk.StringVar(value="—")
+        variable = tk.StringVar(value="-")
         ttk.Label(parent, textvariable=variable, wraplength=900).grid(
             row=row, column=1, sticky=tk.W, pady=2
         )
@@ -725,9 +777,9 @@ class ControlPanel(tk.Tk):
         if status.get("last_check_status") == "ok":
             result = self.t("success")
             if status.get("last_check_sms_sent"):
-                result += f" — {self.t('sms_sent_suffix')}"
+                result += f" - {self.t('sms_sent_suffix')}"
             else:
-                result += f" — {self.t('sms_not_needed')}"
+                result += f" - {self.t('sms_not_needed')}"
         elif status.get("last_check_status") == "error":
             result = self.t("error")
         elif status.get("worker_state") == "checking":
@@ -755,6 +807,12 @@ class ControlPanel(tk.Tk):
         if status.get("last_manual_action_error"):
             errors.append(f"{self.t('manual_prefix')}: {status['last_manual_action_error']}")
         self.error_var.set(" | ".join(errors) if errors else self.t("none"))
+        self.connection_var.set(connection_status_text(status, self.t))
+        self.network_chart.set_data(
+            read_network_history(NETWORK_HISTORY_PATH),
+            None,
+            status.get("connection_slow_threshold_mbps"),
+        )
         self._populate_events(events)
 
     def _localized_sms_reason(self, status: dict[str, Any]) -> str:
@@ -785,6 +843,8 @@ class ControlPanel(tk.Tk):
             return self.t("runtime_inbox_cleared", count=int(event.get("deleted_sms_count", 0)))
         if event_type == "modem_restarted":
             return self.t("runtime_modem_restarted")
+        if event_type in WATCHDOG_EVENT_KEYS and event_type != "watchdog_failed":
+            return self.t(f"runtime_{event_type}")
         if event_type == "sms_sent":
             trigger_code = event.get("trigger_code")
             if trigger_code == "highspeed_exhausted":
@@ -810,6 +870,7 @@ class ControlPanel(tk.Tk):
             "sms_inbox_cleared": self.t("event_inbox_cleared"),
             "modem_restarted": self.t("event_modem_restarted"),
             "manual_action_failed": self.t("event_manual_failed"),
+            **{key: self.t(f"event_{key}") for key in WATCHDOG_EVENT_KEYS},
         }
         for event in events:
             event_type = str(event.get("event_type", self.t("event_unknown")))

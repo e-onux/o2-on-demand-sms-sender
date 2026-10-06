@@ -12,6 +12,7 @@ from huawei_lte_api.exceptions import LoginErrorAlreadyLoginException
 from huawei_lte_api.enums.sms import BoxTypeEnum
 from dotenv import load_dotenv
 
+import connection_watchdog as watchdog
 from runtime_status import RuntimeStatusStore
 
 load_dotenv()  # Load the .env file
@@ -35,6 +36,7 @@ last_sms_info_path = data_dir / "last_sms_info.txt"
 legacy_last_sms_info_path = app_dir / "last_sms_info.txt"
 sms_threshold_gb = float(os.getenv("SMS_THRESHOLD_GB", "1.9"))
 status_store = RuntimeStatusStore(data_dir)
+watchdog_config = watchdog.WatchdogConfig.from_env()
 
 MODEM_DATE_PATTERN = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})")
 COUNTER_REFRESH_RETRIES = 4
@@ -430,9 +432,100 @@ def restart_modem_manually():
         logout(client)
 
 
+def measure_connection(now=None):
+    """Measure latency every run and download speed only when the watchdog needs it."""
+    now = time.time() if now is None else now
+    state = watchdog.normalized_state(status_store.load().get("connection_watchdog"))
+    sample = watchdog.measure_ping(
+        watchdog_config.ping_targets, watchdog_config.ping_timeout_seconds
+    )
+    sample["speed_measured"] = watchdog.needs_speed_probe(state, now, watchdog_config)
+    if sample["speed_measured"]:
+        sample["download_mbps"] = watchdog.measure_download_mbps(
+            watchdog_config.speed_url,
+            watchdog_config.speed_bytes,
+            watchdog_config.speed_timeout_seconds,
+        )
+    status_store.append_network_sample(sample)
+    status_store.update(connection_probe_ok=sample["ping_ms"] is not None)
+    return sample
+
+
+WATCHDOG_EVENT_MESSAGES = {
+    "connection_slow_sms": "Bağlantı yavaş; önce WEITER SMS'i gönderildi.",
+    "modem_auto_restarted": "Bağlantı SMS'ten sonra da yavaş; modem otomatik yeniden başlatıldı.",
+    "connection_recovered": "Bağlantı yeniden normal hızda.",
+    "restart_limit_reached": "Günlük otomatik yeniden başlatma sınırına ulaşıldı; bekleniyor.",
+}
+
+
+def run_connection_watchdog(client, sample, total_data, sms_already_sent, now=None):
+    """Apply one escalation step. The new state is saved before acting, so a
+    failing or connection-dropping action can never be retried in a tight loop."""
+    now = time.time() if now is None else now
+    previous = watchdog.normalized_state(status_store.load().get("connection_watchdog"))
+    state, action, verdict = watchdog.decide(previous, sample, now, watchdog_config)
+    status_store.update(
+        connection_watchdog=state,
+        connection_verdict=verdict,
+        connection_slow_threshold_mbps=round(
+            watchdog.slow_download_threshold(state, watchdog_config), 2
+        ),
+    )
+    details = {
+        "ping_ms": sample.get("ping_ms"),
+        "loss_percent": sample.get("loss_percent"),
+        "download_mbps": sample.get("download_mbps"),
+    }
+
+    if previous["phase"] != watchdog.PHASE_HEALTHY and state["phase"] == watchdog.PHASE_HEALTHY:
+        status_store.append_event(
+            "connection_recovered", WATCHDOG_EVENT_MESSAGES["connection_recovered"], **details
+        )
+    elif (
+        action is None
+        and state["phase"] == watchdog.PHASE_RESTART_WAIT
+        and len(state["restart_times"]) >= watchdog_config.max_restarts_per_day
+        and previous.get("next_action_at") != state.get("next_action_at")
+    ):
+        status_store.append_event(
+            "restart_limit_reached", WATCHDOG_EVENT_MESSAGES["restart_limit_reached"], **details
+        )
+
+    if action == watchdog.ACTION_SEND_SMS:
+        reason = WATCHDOG_EVENT_MESSAGES["connection_slow_sms"]
+        if not sms_already_sent:
+            client.sms.send_sms(['80112'], 'WEITER')
+            write_last_sms_info(total_data)
+            status_store.mark_sms_sent(
+                reason=reason, usage_bytes=total_data, threshold_gb=sms_threshold_gb
+            )
+        status_store.append_event("connection_slow_sms", reason, **details)
+        print("Connection slow: WEITER SMS sent, re-checking shortly.")
+    elif action == watchdog.ACTION_RESTART_MODEM:
+        status_store.append_event(
+            "modem_auto_restarted",
+            WATCHDOG_EVENT_MESSAGES["modem_auto_restarted"],
+            restart_number=state["episode_restart_count"],
+            next_allowed_at=datetime.datetime.fromtimestamp(state["next_action_at"])
+            .astimezone()
+            .isoformat(timespec="seconds"),
+            **details,
+        )
+        print(f"Connection still slow: restarting modem (#{state['episode_restart_count']}).")
+        client.device.reboot()
+    return action
+
+
 def main():
     client = None
+    sample = None
     status_store.mark_check_started()
+    if watchdog_config.enabled:
+        try:
+            sample = measure_connection()
+        except Exception as error:  # Measurement must never block the SMS check.
+            print(f"Connection measurement failed: {type(error).__name__}: {error}")
     try:
         client = attempt_login()
         sms_messages = read_all_sms_messages(client)
@@ -449,9 +542,18 @@ def main():
     except Exception as error:
         status_store.mark_check_failed(error)
         print(f"Worker failed: {type(error).__name__}: {error}")
-        raise
-    finally:
         logout(client)
+        raise
+
+    try:
+        if sample is not None:
+            action = run_connection_watchdog(client, sample, total_data, sms_sent)
+            if action == watchdog.ACTION_RESTART_MODEM:
+                return  # The session dies with the reboot; logout would only fail.
+    except Exception as error:
+        status_store.append_event("watchdog_failed", f"{type(error).__name__}: {error}")
+        print(f"Connection watchdog failed: {type(error).__name__}: {error}")
+    logout(client)
 
 
 def cli():

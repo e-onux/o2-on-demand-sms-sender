@@ -13,6 +13,7 @@ responsibility:
     - append and trim locked JSONL event history
     - roll daily SMS counters at the local date boundary
     - cap processed operator-trigger fingerprints
+    - atomically rewrite a network history capped at 1,440 samples
   does_not:
     - store modem credentials
     - grow any history without a fixed bound
