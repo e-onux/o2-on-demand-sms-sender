@@ -34,8 +34,8 @@ capabilities:
     owner: desktop-control-panel
     path: capabilities/observe-service-status
     depends_on: [record-runtime-status]
-    implementation: [gui/src/control_panel.py, gui/src/i18n.py]
-    tests: [tests/test_runtime_status.py]
+    implementation: [gui/src/control_panel.py, gui/src/i18n.py, gui/src/network_chart.py]
+    tests: [tests/test_runtime_status.py, tests/test_connection_watchdog.py]
   - id: operate-docker-service
     status: active
     owner: desktop-control-panel
@@ -50,3 +50,10 @@ capabilities:
     depends_on: [observe-service-status]
     implementation: [gui/src/control_panel.py, gui/src/platform_integration.py]
     tests: [tests/test_runtime_status.py]
+  - id: recover-slow-connection
+    status: active
+    owner: modem-automation
+    path: capabilities/recover-slow-connection
+    depends_on: [record-runtime-status, renew-highspeed-data]
+    implementation: [connection_watchdog.py, o2_on_demand_hack.py]
+    tests: [tests/test_connection_watchdog.py]

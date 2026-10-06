@@ -45,6 +45,8 @@ class RuntimeStatusStore:
         self.status_path = self.data_dir / "status.json"
         self.events_path = self.data_dir / "events.jsonl"
         self.lock_path = self.data_dir / ".runtime_status.lock"
+        self.network_history_path = self.data_dir / "network_history.json"
+        self.network_history_max_samples = int(os.getenv("NETWORK_HISTORY_MAX_SAMPLES", "1440"))
         self.event_history_max_bytes = int(os.getenv("EVENT_HISTORY_MAX_BYTES", "2000000"))
         self.event_history_keep_lines = int(os.getenv("EVENT_HISTORY_KEEP_LINES", "2000"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -218,6 +220,27 @@ class RuntimeStatusStore:
             error_text,
             action=action,
         )
+
+    def load_network_history(self) -> list[dict[str, Any]]:
+        try:
+            value = json.loads(self.network_history_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return []
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    def append_network_sample(self, sample: dict[str, Any]) -> None:
+        """Keep a bounded latency/speed history for the GUI chart (24 h at 1/min)."""
+        record = {"timestamp": iso_now(), **sample}
+        with self._locked():
+            history = self.load_network_history()
+            history.append(record)
+            history = history[-self.network_history_max_samples:]
+            temporary_path = self.network_history_path.with_suffix(f".json.{os.getpid()}.tmp")
+            with temporary_path.open("w", encoding="utf-8") as history_file:
+                json.dump(history, history_file, ensure_ascii=False, separators=(",", ":"))
+                history_file.flush()
+                os.fsync(history_file.fileno())
+            os.replace(temporary_path, self.network_history_path)
 
     def clear_events(self) -> None:
         """Clear event history while excluding concurrent worker writes."""

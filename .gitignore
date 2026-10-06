@@ -5,3 +5,4 @@ __pycache__/
 data/
 last_sms_info.txt
 .DS_Store
+._*
