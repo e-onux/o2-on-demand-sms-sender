@@ -39,6 +39,13 @@ Probes that fail outright (DNS or routing errors inside Docker, for example)
 never trigger an action, because a modem restart cannot fix them; the control
 panel shows "cannot measure" instead.
 
+The 4G signal (RSRP/SINR) is read from the modem every run and shown as a
+coloured strip under the chart. When it is weak (RSRP below -105 dBm or SINR
+below 0 dB) the restart notification SMS says so, for example
+`Modem yeniden baslatiliyor. 4G sinyal zayif: RSRP -112 dBm, SINR -3 dB.`
+The existing modem-ping watch and this recovery share one restart marker, and
+this recovery waits 10 minutes after any automatic restart before deciding.
+
 When the connection stays slow, recovery escalates instead of looping:
 
 1. two slow measurements in a row: send `WEITER` once;

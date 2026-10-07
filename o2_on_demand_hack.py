@@ -3,6 +3,10 @@ import datetime
 import hashlib
 import os
 import re
+import shutil
+import socket
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -39,9 +43,57 @@ status_store = RuntimeStatusStore(data_dir)
 watchdog_config = watchdog.WatchdogConfig.from_env()
 
 MODEM_DATE_PATTERN = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})")
+PING_TIME_PATTERN = re.compile(r"time[=<]\s*([0-9]+(?:\.[0-9]+)?)\s*ms")
 COUNTER_REFRESH_RETRIES = 4
 COUNTER_REFRESH_DELAY_SECONDS = 0.5
 SMS_RETENTION_COUNT = int(os.getenv("SMS_RETENTION_COUNT", "3"))
+
+
+def env_bool(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().casefold() not in {"0", "false", "no", "off"}
+
+
+def env_int(name, default):
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid integer for {name}={value!r}; using {default}.")
+        return default
+
+
+def normalize_host(value):
+    host_value = str(value or "").replace("http://", "").replace("https://", "").strip().rstrip("/")
+    if "/" in host_value:
+        host_value = host_value.split("/", 1)[0]
+    if ":" in host_value:
+        host_value = host_value.split(":", 1)[0]
+    return host_value
+
+
+MODEM_LATENCY_WATCH_ENABLED = env_bool("MODEM_LATENCY_WATCH_ENABLED", True)
+MODEM_LATENCY_HOST = normalize_host(os.getenv("MODEM_LATENCY_HOST") or host)
+MODEM_LATENCY_THRESHOLD_MS = env_int("MODEM_LATENCY_THRESHOLD_MS", 800)
+MODEM_LATENCY_PING_TIMEOUT_SECONDS = max(1, env_int("MODEM_LATENCY_PING_TIMEOUT_SECONDS", 2))
+MODEM_LATENCY_BAD_WINDOW_SECONDS = max(30, env_int("MODEM_LATENCY_BAD_WINDOW_SECONDS", 300))
+MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS = max(1, env_int("MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS", 3))
+MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS = max(60, env_int("MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS", 300))
+MODEM_LATENCY_HISTORY_LIMIT = max(10, env_int("MODEM_LATENCY_HISTORY_LIMIT", 180))
+MODEM_RESTART_NOTIFY_ENABLED = env_bool("MODEM_RESTART_NOTIFY_ENABLED", True)
+MODEM_RESTART_NOTIFY_TO = (
+    os.getenv("MODEM_RESTART_NOTIFY_TO")
+    or os.getenv("SMS_DEFAULT_TO")
+    or ""
+).strip()
+MODEM_RESTART_NOTIFY_TEXT = os.getenv(
+    "MODEM_RESTART_NOTIFY_TEXT",
+    "Modem yeniden baslatiliyor.",
+)
 
 O2_TRIGGER_REASONS = {
     "highspeed_exhausted": "O2 yüksek hız veri hacmi tükendi SMS'i alındı.",
@@ -220,6 +272,241 @@ def retain_recent_sms(client, messages, keep_count=SMS_RETENTION_COUNT):
         deleted_count += 1
         print(f"Old SMS deleted (index: {message['Index']}).")
     return deleted_count
+
+
+def ping_command_for_host(hostname):
+    ping_path = shutil.which("ping")
+    if not ping_path:
+        return None
+    if sys.platform == "darwin":
+        timeout_ms = MODEM_LATENCY_PING_TIMEOUT_SECONDS * 1000
+        return [ping_path, "-n", "-c", "1", "-W", str(timeout_ms), hostname]
+    return [
+        ping_path,
+        "-n",
+        "-c",
+        "1",
+        "-W",
+        str(MODEM_LATENCY_PING_TIMEOUT_SECONDS),
+        hostname,
+    ]
+
+
+def measure_tcp_latency_ms(hostname, port_number=80):
+    started_at = time.monotonic()
+    try:
+        with socket.create_connection(
+            (hostname, port_number),
+            timeout=MODEM_LATENCY_PING_TIMEOUT_SECONDS,
+        ):
+            pass
+    except OSError as error:
+        print(f"Modem TCP latency probe failed: {type(error).__name__}: {error}")
+        return None
+    return (time.monotonic() - started_at) * 1000
+
+
+def measure_modem_latency_ms(hostname=MODEM_LATENCY_HOST):
+    hostname = normalize_host(hostname)
+    if not hostname:
+        return None
+
+    command = ping_command_for_host(hostname)
+    if command:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=MODEM_LATENCY_PING_TIMEOUT_SECONDS + 1,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            print(f"Modem ping probe failed: {type(error).__name__}: {error}")
+        else:
+            output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+            match = PING_TIME_PATTERN.search(output)
+            if result.returncode == 0 and match:
+                return float(match.group(1))
+            print(f"Modem ping probe failed for {hostname}.")
+
+    return measure_tcp_latency_ms(hostname)
+
+
+def modem_latency_sample_is_bad(latency_ms, threshold_ms=MODEM_LATENCY_THRESHOLD_MS):
+    return latency_ms is None or float(latency_ms) >= threshold_ms
+
+
+def latency_history_from_status(status):
+    history = status.get("modem_latency_history", [])
+    if not isinstance(history, list):
+        return []
+    return [sample for sample in history if isinstance(sample, dict)]
+
+
+def record_modem_latency_sample(latency_ms):
+    if not MODEM_LATENCY_WATCH_ENABLED:
+        return {"enabled": False, "should_reboot": False}
+
+    observed_at = time.time()
+    observed_at_iso = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    is_bad = modem_latency_sample_is_bad(latency_ms)
+
+    status = status_store.load()
+    last_reboot_epoch = float(status.get("last_modem_latency_reboot_epoch") or 0)
+    window_start = max(
+        observed_at - MODEM_LATENCY_BAD_WINDOW_SECONDS,
+        last_reboot_epoch,
+    )
+    history = latency_history_from_status(status)
+    sample = {
+        "timestamp": observed_at_iso,
+        "epoch": observed_at,
+        "latency_ms": None if latency_ms is None else round(float(latency_ms), 1),
+        "ok": not is_bad,
+    }
+    history.append(sample)
+    history = history[-MODEM_LATENCY_HISTORY_LIMIT:]
+    bad_samples = [
+        item
+        for item in history
+        if not bool(item.get("ok", True)) and float(item.get("epoch") or 0) >= window_start
+    ]
+    bad_count = len(bad_samples)
+    cooldown_remaining = max(
+        0,
+        int(MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS - (observed_at - last_reboot_epoch)),
+    )
+    should_reboot = (
+        bad_count >= MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS
+        and cooldown_remaining == 0
+    )
+
+    status_store.update(
+        modem_latency_watch_enabled=True,
+        modem_latency_host=MODEM_LATENCY_HOST,
+        modem_latency_last_ms=sample["latency_ms"],
+        modem_latency_last_ok=sample["ok"],
+        modem_latency_last_checked_at=observed_at_iso,
+        modem_latency_threshold_ms=MODEM_LATENCY_THRESHOLD_MS,
+        modem_latency_bad_window_seconds=MODEM_LATENCY_BAD_WINDOW_SECONDS,
+        modem_latency_reboot_after_bad_checks=MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS,
+        modem_latency_reboot_cooldown_seconds=MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS,
+        modem_latency_bad_count=bad_count,
+        modem_latency_reboot_cooldown_remaining_seconds=cooldown_remaining,
+        modem_latency_history=history,
+    )
+
+    if is_bad:
+        latency_text = (
+            "unreachable" if latency_ms is None else f"{float(latency_ms):.1f} ms"
+        )
+        status_store.append_event(
+            "modem_latency_high",
+            f"Modem latency is high ({latency_text}).",
+            latency_ms=sample["latency_ms"],
+            threshold_ms=MODEM_LATENCY_THRESHOLD_MS,
+            bad_sample_count=bad_count,
+            reboot_after_bad_checks=MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS,
+            window_seconds=MODEM_LATENCY_BAD_WINDOW_SECONDS,
+            cooldown_remaining_seconds=cooldown_remaining,
+        )
+
+    return {
+        "enabled": True,
+        "should_reboot": should_reboot,
+        "latency_ms": sample["latency_ms"],
+        "bad_count": bad_count,
+        "cooldown_remaining": cooldown_remaining,
+        "observed_at": observed_at,
+        "observed_at_iso": observed_at_iso,
+    }
+
+
+def masked_phone_number(value):
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "****"
+    return f"{'*' * max(0, len(value) - 4)}{value[-4:]}"
+
+
+def read_modem_signal(client):
+    """Return parsed RSRP/RSRQ/SINR, or None when the modem does not report them."""
+    try:
+        signal = watchdog.parse_signal(client.device.signal())
+    except Exception as error:
+        print(f"Reading modem signal failed: {type(error).__name__}: {error}")
+        return None
+    return signal if any(value is not None for value in signal.values()) else None
+
+
+def weak_signal_note(signal):
+    """ASCII text keeps the SMS in the GSM alphabet (one 160-character part)."""
+    if not watchdog.signal_is_weak(signal, watchdog_config):
+        return ""
+    parts = [
+        f"{label} {signal[key]:g} {unit}"
+        for key, label, unit in (("rsrp", "RSRP", "dBm"), ("sinr", "SINR", "dB"))
+        if signal.get(key) is not None
+    ]
+    return " 4G sinyal zayif: " + ", ".join(parts) + "."
+
+
+def send_modem_restart_notification(client, reason):
+    if not MODEM_RESTART_NOTIFY_ENABLED or not MODEM_RESTART_NOTIFY_TO:
+        return False
+    try:
+        text = MODEM_RESTART_NOTIFY_TEXT + weak_signal_note(read_modem_signal(client))
+        client.sms.send_sms([MODEM_RESTART_NOTIFY_TO], text)
+        status_store.append_event(
+            "modem_restart_notification_sent",
+            "Modem restart SMS notification was sent.",
+            reason=reason,
+            recipient=masked_phone_number(MODEM_RESTART_NOTIFY_TO),
+        )
+        print("Modem restart SMS notification sent.")
+        return True
+    except Exception as error:
+        status_store.append_event(
+            "modem_restart_notification_failed",
+            f"Modem restart SMS notification failed: {type(error).__name__}: {error}",
+            reason=reason,
+        )
+        print(f"Modem restart SMS notification failed: {type(error).__name__}: {error}")
+        return False
+
+
+def restart_modem_for_latency(client, decision):
+    notification_sent = send_modem_restart_notification(client, "modem_latency")
+    client.device.reboot()
+    restarted_at = time.time()
+    restarted_at_iso = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    status_store.update(
+        worker_state="idle",
+        last_check_at=restarted_at_iso,
+        last_check_status="ok",
+        last_error=None,
+        last_check_sms_sent=False,
+        last_deleted_sms_count=0,
+        last_modem_latency_reboot_at=restarted_at_iso,
+        last_modem_latency_reboot_epoch=restarted_at,
+        last_auto_modem_restart_reason="modem_latency",
+        last_modem_restart_notification_sent=notification_sent,
+        modem_latency_bad_count=0,
+        modem_latency_reboot_cooldown_remaining_seconds=MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS,
+    )
+    status_store.append_event(
+        "modem_latency_reboot",
+        "Modem restart was requested because latency stayed high.",
+        latency_ms=decision.get("latency_ms"),
+        bad_sample_count=decision.get("bad_count"),
+        threshold_ms=MODEM_LATENCY_THRESHOLD_MS,
+        window_seconds=MODEM_LATENCY_BAD_WINDOW_SECONDS,
+        cooldown_seconds=MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS,
+        notification_sent=notification_sent,
+    )
+    print("Modem restart requested automatically because latency stayed high.")
 
 def local_today():
     return datetime.datetime.now().astimezone().date()
@@ -417,11 +704,14 @@ def restart_modem_manually():
     client = None
     try:
         client = attempt_login()
+        notification_sent = send_modem_restart_notification(client, "manual")
         client.device.reboot()
         status_store.mark_manual_action_completed("restart_modem")
+        status_store.update(last_modem_restart_notification_sent=notification_sent)
         status_store.append_event(
             "modem_restarted",
             "Modem restart was requested from the control panel.",
+            notification_sent=notification_sent,
         )
         print("Modem restart requested successfully.")
     except Exception as error:
@@ -432,13 +722,15 @@ def restart_modem_manually():
         logout(client)
 
 
-def measure_connection(now=None):
+def measure_connection(now=None, modem_ms=None):
     """Measure latency every run and download speed only when the watchdog needs it."""
     now = time.time() if now is None else now
     state = watchdog.normalized_state(status_store.load().get("connection_watchdog"))
     sample = watchdog.measure_ping(
         watchdog_config.ping_targets, watchdog_config.ping_timeout_seconds
     )
+    # Stored with the sample so the GUI can chart modem and internet ping on one time axis.
+    sample["modem_ms"] = None if modem_ms is None else round(float(modem_ms), 1)
     sample["speed_measured"] = watchdog.needs_speed_probe(state, now, watchdog_config)
     if sample["speed_measured"]:
         sample["download_mbps"] = watchdog.measure_download_mbps(
@@ -450,6 +742,21 @@ def measure_connection(now=None):
     status_store.update(connection_probe_ok=sample["ping_ms"] is not None)
     return sample
 
+
+WATCHDOG_RESTART_GRACE_SECONDS = 600
+
+
+def record_modem_signal(client):
+    """Attach this run's 4G signal to the network sample for the GUI chart."""
+    signal = read_modem_signal(client)
+    if signal is None:
+        return None
+    status_store.annotate_last_network_sample(rsrp=signal["rsrp"], sinr=signal["sinr"])
+    status_store.update(
+        modem_signal=signal,
+        modem_signal_weak=watchdog.signal_is_weak(signal, watchdog_config),
+    )
+    return signal
 
 WATCHDOG_EVENT_MESSAGES = {
     "connection_slow_sms": "Bağlantı yavaş; önce WEITER SMS'i gönderildi.",
@@ -463,7 +770,17 @@ def run_connection_watchdog(client, sample, total_data, sms_already_sent, now=No
     """Apply one escalation step. The new state is saved before acting, so a
     failing or connection-dropping action can never be retried in a tight loop."""
     now = time.time() if now is None else now
-    previous = watchdog.normalized_state(status_store.load().get("connection_watchdog"))
+    status = status_store.load()
+    last_latency_reboot = float(status.get("last_modem_latency_reboot_epoch") or 0)
+    if last_latency_reboot and 0 <= now - last_latency_reboot < WATCHDOG_RESTART_GRACE_SECONDS:
+        # Right after any automatic restart everything looks slow while the
+        # modem boots; deciding now would stack a second restart on the first.
+        state = watchdog.normalized_state(status.get("connection_watchdog"))
+        if sample.get("speed_measured"):
+            state["last_speed_probe_at"] = now  # keep the 15-minute probe schedule
+        status_store.update(connection_watchdog=state, connection_verdict="grace")
+        return None
+    previous = watchdog.normalized_state(status.get("connection_watchdog"))
     state, action, verdict = watchdog.decide(previous, sample, now, watchdog_config)
     status_store.update(
         connection_watchdog=state,
@@ -513,6 +830,14 @@ def run_connection_watchdog(client, sample, total_data, sms_already_sent, now=No
             **details,
         )
         print(f"Connection still slow: restarting modem (#{state['episode_restart_count']}).")
+        notification_sent = send_modem_restart_notification(client, "slow_connection")
+        # Shares the latency watch's reboot marker so its cooldown and bad-sample
+        # window restart too, and it does not reboot the booting modem again.
+        status_store.update(
+            last_modem_latency_reboot_epoch=now,
+            last_auto_modem_restart_reason="slow_connection",
+            last_modem_restart_notification_sent=notification_sent,
+        )
         client.device.reboot()
     return action
 
@@ -521,13 +846,21 @@ def main():
     client = None
     sample = None
     status_store.mark_check_started()
-    if watchdog_config.enabled:
-        try:
-            sample = measure_connection()
-        except Exception as error:  # Measurement must never block the SMS check.
-            print(f"Connection measurement failed: {type(error).__name__}: {error}")
     try:
+        modem_latency_ms = measure_modem_latency_ms()
+        latency_decision = record_modem_latency_sample(modem_latency_ms)
+        if watchdog_config.enabled:
+            try:
+                sample = measure_connection(modem_ms=modem_latency_ms)
+            except Exception as error:  # Measurement must never block the SMS check.
+                print(f"Connection measurement failed: {type(error).__name__}: {error}")
         client = attempt_login()
+        if watchdog_config.enabled:
+            record_modem_signal(client)
+        if latency_decision.get("should_reboot"):
+            restart_modem_for_latency(client, latency_decision)
+            return
+
         sms_messages = read_all_sms_messages(client)
         trigger = find_o2_sms_trigger(sms_messages)
         total_data, baseline_bytes, sms_sent = check_data_usage_and_send_sms(client, trigger)

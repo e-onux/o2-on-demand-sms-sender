@@ -204,6 +204,63 @@ class WorkerUsageTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(json.loads(events[0])["event_type"], "modem_restarted")
 
+    def test_latency_watch_reboots_after_three_bad_samples_inside_window(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            store = RuntimeStatusStore(temporary_directory)
+            with patch.multiple(
+                worker,
+                status_store=store,
+                MODEM_LATENCY_WATCH_ENABLED=True,
+                MODEM_LATENCY_HOST="192.168.9.1",
+                MODEM_LATENCY_THRESHOLD_MS=800,
+                MODEM_LATENCY_BAD_WINDOW_SECONDS=300,
+                MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS=3,
+                MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS=300,
+            ), patch.object(worker.time, "time", side_effect=[1000, 1060, 1120]):
+                decisions = [
+                    worker.record_modem_latency_sample(1200),
+                    worker.record_modem_latency_sample(1300),
+                    worker.record_modem_latency_sample(None),
+                ]
+
+            status = store.load()
+
+        self.assertFalse(decisions[0]["should_reboot"])
+        self.assertFalse(decisions[1]["should_reboot"])
+        self.assertTrue(decisions[2]["should_reboot"])
+        self.assertEqual(status["modem_latency_bad_count"], 3)
+        self.assertEqual(len(status["modem_latency_history"]), 3)
+
+    def test_latency_restart_sends_notification_before_reboot(self):
+        client = FakeClient([AFTER_RESET_MONTH_STATS])
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            store = RuntimeStatusStore(temporary_directory)
+            with patch.multiple(
+                worker,
+                status_store=store,
+                MODEM_RESTART_NOTIFY_ENABLED=True,
+                MODEM_RESTART_NOTIFY_TO="0123456789",
+                MODEM_RESTART_NOTIFY_TEXT="Modem yeniden baslatiliyor.",
+                MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS=300,
+            ), patch.object(worker.time, "time", return_value=2000):
+                worker.restart_modem_for_latency(
+                    client,
+                    {"latency_ms": 1200, "bad_count": 3},
+                )
+
+            status = store.load()
+            event_types = [
+                json.loads(line)["event_type"]
+                for line in store.events_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+
+        self.assertEqual(client.sms.sent, [(["0123456789"], "Modem yeniden baslatiliyor.")])
+        self.assertEqual(client.device.reboot_calls, 1)
+        self.assertTrue(status["last_modem_restart_notification_sent"])
+        self.assertIn("modem_restart_notification_sent", event_types)
+        self.assertIn("modem_latency_reboot", event_types)
+
     def test_no_sms_when_reset_cannot_be_verified(self):
         client = FakeClient([REAL_STALE_MONTH_STATS] * 5)
         with tempfile.TemporaryDirectory() as temporary_directory:

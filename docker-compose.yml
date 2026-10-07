@@ -18,10 +18,26 @@ services:
       WATCHDOG_MIN_DOWNLOAD_MBPS: ${WATCHDOG_MIN_DOWNLOAD_MBPS:-5}
       WATCHDOG_RESTART_BACKOFF_MINUTES: ${WATCHDOG_RESTART_BACKOFF_MINUTES:-30,180,360,720,1440}
       WATCHDOG_MAX_RESTARTS_PER_DAY: ${WATCHDOG_MAX_RESTARTS_PER_DAY:-4}
+      MODEM_LATENCY_WATCH_ENABLED: ${MODEM_LATENCY_WATCH_ENABLED:-true}
+      # Empty means "ping MODEM_HOST"
+      MODEM_LATENCY_HOST: ${MODEM_LATENCY_HOST:-}
+      MODEM_LATENCY_THRESHOLD_MS: ${MODEM_LATENCY_THRESHOLD_MS:-800}
+      MODEM_LATENCY_BAD_WINDOW_SECONDS: ${MODEM_LATENCY_BAD_WINDOW_SECONDS:-300}
+      MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS: ${MODEM_LATENCY_REBOOT_AFTER_BAD_CHECKS:-3}
+      MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS: ${MODEM_LATENCY_REBOOT_COOLDOWN_SECONDS:-300}
+      # Phone number that gets an SMS before every modem restart (empty disables it)
+      MODEM_RESTART_NOTIFY_ENABLED: ${MODEM_RESTART_NOTIFY_ENABLED:-true}
+      MODEM_RESTART_NOTIFY_TO: ${MODEM_RESTART_NOTIFY_TO:-}
+      MODEM_RESTART_NOTIFY_TEXT: ${MODEM_RESTART_NOTIFY_TEXT:-Modem yeniden baslatiliyor.}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       # Persistent statistics and SMS history, shared with control_panel.py
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "supervisorctl", "status", "sms-runner"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     # Host network is the most reliable for reaching modem IPs like 192.168.8.1
     network_mode: "host"
     restart: unless-stopped

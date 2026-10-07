@@ -19,7 +19,9 @@ responsibility:
     - send WEITER once per slow episode, re-measure after a short wait, then restart the modem if still slow
     - space restarts by an escalating backoff and a rolling 24-hour cap, resetting only after sustained recovery
     - persist its state before executing an action so a failing action is never retried in a tight loop
-    - keep a bounded latency/speed history for the GUI chart
+    - keep a bounded latency/speed history for the GUI chart, including modem ping and 4G RSRP/SINR
+    - skip decisions for 10 minutes after any automatic modem restart and share the latency watch's reboot marker
+    - append "4G sinyal zayif" with RSRP/SINR to the restart notification SMS when RSRP < -105 dBm or SINR < 0 dB
   does_not:
     - call the modem API itself (the worker executes the returned action)
     - change the usage-threshold or operator-message renewal behavior
@@ -58,6 +60,9 @@ examples:
   - name: Failed probes (container DNS down) never act
     input: { samples_per_minute: "10 h of failed probes" }
     expected: { actions: [], phase: healthy }
+  - name: Weak signal is named in the restart notification
+    input: { signal: { rsrp: "-112dBm", sinr: "-3dB" } }
+    expected: { sms: "Modem yeniden baslatiliyor. 4G sinyal zayif: RSRP -112 dBm, SINR -3 dB." }
   - name: A reboot call that raises is not retried every minute
     input: { samples_per_minute: "10 x slow", reboot_raises: true }
     expected_error: { code: REBOOT_FAILED, reboot_calls: 1 }

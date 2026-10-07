@@ -18,7 +18,9 @@ decision:
     Time a small HTTP request every run plus a 1 MB download probe every 15 minutes (every run only while
     confirming), send WEITER once, then restart with a 30 min / 3 h / 6 h / 12 h / 24 h backoff and at most 4
     restarts per rolling 24 hours. Reset the ladder only after one hour of healthy probes. Probes that fail
-    outright count as "unknown" and never trigger an action.
+    outright count as "unknown" and never trigger an action. The existing modem-latency watch keeps working
+    unchanged; both share one reboot marker so neither restarts a modem the other has just restarted. 4G
+    RSRP/SINR is recorded per run and reported in the restart SMS when weak, but does not block a restart.
   summary: A pure state machine in connection_watchdog.py decides; the worker executes the action.
 
 alternatives:

@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 
 # Install supervisor and basics
-RUN apt-get update && apt-get install -y --no-install-recommends           supervisor bash tzdata ca-certificates         && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends           supervisor bash tzdata ca-certificates iputils-ping         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

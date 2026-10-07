@@ -47,6 +47,7 @@ def resolve_project_dir() -> Path:
         Path.cwd(),
         Path(__file__).resolve().parent,
         Path(sys.executable).resolve().parent,
+        Path("/Users/emironuk/Projects/HomeNAS/o2-on-demand-sms-sender"),
         Path("/Users/emironuk/Documents/Projeler/01_Kisisel_Projeler/o2-on-demand-sms-sender"),
     ]
     checked: set[Path] = set()
@@ -515,6 +516,14 @@ class ControlPanel(tk.Tk):
         self.after(5000, self._periodic_refresh)
         if "--minimized" in sys.argv:
             self.after(250, self._minimize_to_tray)
+        elif not any(
+            argument in sys.argv
+            for argument in ("--gui-smoke-test", "--tray-lifecycle-smoke-test")
+        ):
+            # AppKit can leave the initial Tk window withdrawn while the
+            # separate menu-bar helper is registering. Restore it once the
+            # helper handshake has had time to complete.
+            self.after(500, self._show_window)
 
     def t(self, key: str, **values: Any) -> str:
         return translate(self.language, key, **values)
@@ -665,13 +674,16 @@ class ControlPanel(tk.Tk):
         self.error_var = self._detail_row(details, 3, self.t("last_error"))
         self.connection_var = self._detail_row(details, 4, self.t("connection_status"))
 
+        latency_frame = ttk.LabelFrame(root, text=self.t("network_chart"), padding=10)
+        latency_frame.pack(fill=tk.X, pady=(0, 14))
+        self.latency_summary_var = tk.StringVar(value=self.t("no_latency_record"))
+        ttk.Label(latency_frame, textvariable=self.latency_summary_var).pack(anchor=tk.W, pady=(0, 4))
+        self.network_chart = NetworkChart(latency_frame, self.t)
+        self.network_chart.pack(fill=tk.X)
+
         panes = ttk.Panedwindow(root, orient=tk.VERTICAL)
         panes.pack(fill=tk.BOTH, expand=True)
 
-        chart_frame = ttk.LabelFrame(panes, text=self.t("network_chart"), padding=8)
-        panes.add(chart_frame, weight=2)
-        self.network_chart = NetworkChart(chart_frame, self.t)
-        self.network_chart.pack(fill=tk.BOTH, expand=True)
 
         events_frame = ttk.LabelFrame(panes, text=self.t("recent_events"), padding=8)
         panes.add(events_frame, weight=3)
@@ -807,13 +819,62 @@ class ControlPanel(tk.Tk):
         if status.get("last_manual_action_error"):
             errors.append(f"{self.t('manual_prefix')}: {status['last_manual_action_error']}")
         self.error_var.set(" | ".join(errors) if errors else self.t("none"))
+        self._update_latency_panel(status)
         self.connection_var.set(connection_status_text(status, self.t))
+        self._populate_events(events)
+
+    def _update_latency_panel(self, status: dict[str, Any]) -> None:
+        if not status.get("modem_latency_watch_enabled"):
+            self.latency_summary_var.set(self.t("no_latency_record"))
+            self._update_network_chart(status)
+            return
+
+        threshold = int(status.get("modem_latency_threshold_ms") or 0)
+        bad_count = int(status.get("modem_latency_bad_count") or 0)
+        reboot_after = int(status.get("modem_latency_reboot_after_bad_checks") or 0)
+        cooldown = int(status.get("modem_latency_reboot_cooldown_remaining_seconds") or 0)
+        checked_at = format_timestamp(status.get("modem_latency_last_checked_at"), self.t("never"))
+        latency_ms = status.get("modem_latency_last_ms")
+
+        if latency_ms is None:
+            text = self.t(
+                "latency_summary_unreachable",
+                threshold=threshold,
+                bad_count=bad_count,
+                reboot_after=reboot_after,
+                cooldown=cooldown,
+                checked_at=checked_at,
+            )
+        elif bool(status.get("modem_latency_last_ok", True)):
+            text = self.t(
+                "latency_summary_ok",
+                latency=float(latency_ms),
+                threshold=threshold,
+                checked_at=checked_at,
+            )
+        else:
+            text = self.t(
+                "latency_summary_bad",
+                latency=float(latency_ms),
+                threshold=threshold,
+                bad_count=bad_count,
+                reboot_after=reboot_after,
+                cooldown=cooldown,
+                checked_at=checked_at,
+            )
+        self._update_network_chart(status)
+        self.latency_summary_var.set(
+            f"{self.t('chart_legend_modem')}: {text}\n{self.network_chart.summary_text()}"
+        )
+
+    def _update_network_chart(self, status: dict[str, Any]) -> None:
+        modem_history = status.get("modem_latency_history")
         self.network_chart.set_data(
             read_network_history(NETWORK_HISTORY_PATH),
-            None,
+            modem_history if isinstance(modem_history, list) else [],
+            status.get("modem_latency_threshold_ms"),
             status.get("connection_slow_threshold_mbps"),
         )
-        self._populate_events(events)
 
     def _localized_sms_reason(self, status: dict[str, Any]) -> str:
         reason = str(status.get("last_sms_reason") or "")
@@ -843,6 +904,26 @@ class ControlPanel(tk.Tk):
             return self.t("runtime_inbox_cleared", count=int(event.get("deleted_sms_count", 0)))
         if event_type == "modem_restarted":
             return self.t("runtime_modem_restarted")
+        if event_type == "modem_latency_high":
+            if event.get("latency_ms") is None:
+                return self.t(
+                    "runtime_latency_high_unreachable",
+                    count=int(event.get("bad_sample_count", 0)),
+                    limit=int(event.get("reboot_after_bad_checks", 0)),
+                )
+            return self.t(
+                "runtime_latency_high",
+                latency=float(event.get("latency_ms", 0)),
+                threshold=float(event.get("threshold_ms", 0)),
+                count=int(event.get("bad_sample_count", 0)),
+                limit=int(event.get("reboot_after_bad_checks", 0)),
+            )
+        if event_type == "modem_latency_reboot":
+            return self.t("runtime_latency_reboot")
+        if event_type == "modem_restart_notification_sent":
+            return self.t("runtime_restart_notification_sent")
+        if event_type == "modem_restart_notification_failed":
+            return self.t("runtime_restart_notification_failed")
         if event_type in WATCHDOG_EVENT_KEYS and event_type != "watchdog_failed":
             return self.t(f"runtime_{event_type}")
         if event_type == "sms_sent":
@@ -869,6 +950,10 @@ class ControlPanel(tk.Tk):
             "sms_baseline_reset": self.t("event_baseline_reset"),
             "sms_inbox_cleared": self.t("event_inbox_cleared"),
             "modem_restarted": self.t("event_modem_restarted"),
+            "modem_latency_high": self.t("event_latency_high"),
+            "modem_latency_reboot": self.t("event_latency_reboot"),
+            "modem_restart_notification_sent": self.t("event_restart_notification_sent"),
+            "modem_restart_notification_failed": self.t("event_restart_notification_failed"),
             "manual_action_failed": self.t("event_manual_failed"),
             **{key: self.t(f"event_{key}") for key in WATCHDOG_EVENT_KEYS},
         }
