@@ -1,23 +1,22 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-venv/
-.env
-.env.local
-data/
-gui/build/
-gui/.build-work/
-gui/.venv-build/
-gui/.venv-build-windows/
-
-# Git
 .git
 .gitignore
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
 
-# Misc
-*.log
-.DS_Store
+data
+last_sms_info.txt
+
+gui/.venv-build
+gui/.build-work
+gui/build
+gui
+
+*.app
+*.dmg
+*.zip
+
+# Credentials come from the Compose/Portainer environment
+.env
+.env.*

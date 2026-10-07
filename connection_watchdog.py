@@ -22,6 +22,7 @@ or routing errors, for example a broken container network) are "unknown", never
 
 import http.client
 import os
+import re
 import statistics
 import time
 import urllib.request
@@ -91,6 +92,8 @@ class WatchdogConfig:
     restart_backoff_seconds: tuple[int, ...] = (30 * 60, 3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600)
     recovery_seconds: int = 3600
     max_restarts_per_day: int = 4
+    weak_rsrp_dbm: float = -105.0
+    weak_sinr_db: float = 0.0
 
     @classmethod
     def from_env(cls) -> "WatchdogConfig":
@@ -119,6 +122,8 @@ class WatchdogConfig:
             max_restarts_per_day=int(
                 _env_float("WATCHDOG_MAX_RESTARTS_PER_DAY", defaults.max_restarts_per_day)
             ),
+            weak_rsrp_dbm=_env_float("WATCHDOG_WEAK_RSRP_DBM", defaults.weak_rsrp_dbm),
+            weak_sinr_db=_env_float("WATCHDOG_WEAK_SINR_DB", defaults.weak_sinr_db),
         )
 
 
@@ -171,14 +176,40 @@ def measure_download_mbps(
             first_chunk = response.read(16 * 1024)
             started = time.monotonic()
             received = 0
+            # The socket timeout only bounds each read; on a crawling line the
+            # whole download could take minutes, so stop at the deadline and
+            # rate what arrived, which is a valid (slow) measurement.
             while chunk := response.read(64 * 1024):
                 received += len(chunk)
+                if time.monotonic() - started >= timeout:
+                    break
             elapsed = time.monotonic() - started
     except (OSError, ValueError):
         return None
     if not first_chunk or received <= 0 or elapsed <= 0:
         return None
     return round(received * 8 / elapsed / 1_000_000, 2)
+
+
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def parse_signal(raw: Any) -> dict[str, float | None]:
+    """Turn Huawei strings such as "-87dBm" or ">=-44dBm" into numbers."""
+    result: dict[str, float | None] = {}
+    for key in ("rsrp", "rsrq", "sinr"):
+        match = _NUMBER.search(str((raw or {}).get(key) or ""))
+        result[key] = float(match.group()) if match else None
+    return result
+
+
+def signal_is_weak(signal: dict[str, Any] | None, config: WatchdogConfig) -> bool:
+    if not signal:
+        return False
+    rsrp, sinr = signal.get("rsrp"), signal.get("sinr")
+    return (rsrp is not None and rsrp < config.weak_rsrp_dbm) or (
+        sinr is not None and sinr < config.weak_sinr_db
+    )
 
 
 # --- decision --------------------------------------------------------------

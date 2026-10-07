@@ -174,6 +174,30 @@ class MeasurementTests(unittest.TestCase):
 
         self.assertIsNone(watchdog.measure_download_mbps("http://x/{bytes}", 10, 1.0, opener=opener))
 
+    def test_download_stops_at_the_deadline_and_rates_what_arrived(self):
+        class Crawling:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self, size):
+                return b"x" * 1000  # endless trickle
+
+        clock = iter(range(100))
+        with patch.object(watchdog.time, "monotonic", lambda: next(clock)):
+            mbps = watchdog.measure_download_mbps("http://x/{bytes}", 10**9, 5.0, opener=lambda r, timeout: Crawling())
+        self.assertAlmostEqual(mbps, 0.01)
+
+    def test_signal_strings_are_parsed(self):
+        signal = watchdog.parse_signal({"rsrp": "-87dBm", "rsrq": "-7dB", "sinr": ">=30dB"})
+        self.assertEqual(signal, {"rsrp": -87.0, "rsrq": -7.0, "sinr": 30.0})
+        self.assertEqual(watchdog.parse_signal(None), {"rsrp": None, "rsrq": None, "sinr": None})
+        self.assertTrue(watchdog.signal_is_weak({"rsrp": -110.0, "sinr": 5.0}, CONFIG))
+        self.assertTrue(watchdog.signal_is_weak({"rsrp": -90.0, "sinr": -1.0}, CONFIG))
+        self.assertFalse(watchdog.signal_is_weak({"rsrp": -87.0, "sinr": 13.0}, CONFIG))
+
     def test_download_speed_is_positive(self):
         def opener(request, timeout):
             return io.BytesIO(b"x" * 300_000)
@@ -233,6 +257,66 @@ class WorkerWatchdogTests(unittest.TestCase):
                 pass
         self.assertEqual(client.device.reboot_calls, 1)
 
+    def test_no_decision_right_after_a_latency_watch_reboot(self):
+        client = FakeClient([{}])
+        self.store.update(last_modem_latency_reboot_epoch=1000)
+        for minute in range(9):
+            worker.run_connection_watchdog(client, SLOW, 1000, False, now=1000 + minute * MINUTE)
+        self.assertEqual(client.sms.sent, [])
+        self.assertEqual(self.store.load()["connection_verdict"], "grace")
+
+    def test_slow_connection_restart_starts_the_latency_watch_cooldown(self):
+        client = FakeClient([{}])
+        with patch.multiple(
+            worker,
+            MODEM_RESTART_NOTIFY_ENABLED=True,
+            MODEM_RESTART_NOTIFY_TO="0123456789",
+            MODEM_RESTART_NOTIFY_TEXT="Modem yeniden baslatiliyor.",
+        ):
+            for minute in range(4):
+                worker.run_connection_watchdog(client, SLOW, 1000, True, now=minute * MINUTE)
+        status = self.store.load()
+        self.assertEqual(client.device.reboot_calls, 1)
+        self.assertEqual(status["last_modem_latency_reboot_epoch"], 3 * MINUTE)
+        self.assertEqual(status["last_auto_modem_restart_reason"], "slow_connection")
+        self.assertEqual(client.sms.sent, [(["0123456789"], "Modem yeniden baslatiliyor.")])
+
+    def test_modem_latency_is_stored_with_the_network_sample(self):
+        with patch.object(worker.watchdog, "measure_ping", return_value={"ping_ms": 30.0, "loss_percent": 0.0}), \
+                patch.object(worker.watchdog, "measure_download_mbps", return_value=40.0):
+            sample = worker.measure_connection(now=0, modem_ms=2.345)
+        self.assertEqual(sample["modem_ms"], 2.3)
+        self.assertEqual(self.store.load_network_history()[-1]["modem_ms"], 2.3)
+
+    def _notify(self, raw_signal):
+        client = FakeClient([{}])
+        client.device.signal = lambda: raw_signal
+        with patch.multiple(
+            worker,
+            MODEM_RESTART_NOTIFY_ENABLED=True,
+            MODEM_RESTART_NOTIFY_TO="0123456789",
+            MODEM_RESTART_NOTIFY_TEXT="Modem yeniden baslatiliyor.",
+        ):
+            worker.send_modem_restart_notification(client, "slow_connection")
+        return client.sms.sent[0][1]
+
+    def test_restart_sms_mentions_weak_signal(self):
+        text = self._notify({"rsrp": "-112dBm", "sinr": "-3dB"})
+        self.assertEqual(text, "Modem yeniden baslatiliyor. 4G sinyal zayif: RSRP -112 dBm, SINR -3 dB.")
+        self.assertLessEqual(len(text), 160)
+
+    def test_restart_sms_is_unchanged_with_good_or_unknown_signal(self):
+        self.assertEqual(self._notify({"rsrp": "-87dBm", "sinr": "13dB"}), "Modem yeniden baslatiliyor.")
+        self.assertEqual(self._notify(None), "Modem yeniden baslatiliyor.")
+
+    def test_signal_is_attached_to_the_latest_sample(self):
+        self.store.append_network_sample({"ping_ms": 30.0})
+        client = FakeClient([{}])
+        client.device.signal = lambda: {"rsrp": "-87dBm", "sinr": "13dB"}
+        worker.record_modem_signal(client)
+        self.assertEqual(self.store.load_network_history()[-1]["rsrp"], -87.0)
+        self.assertFalse(self.store.load()["modem_signal_weak"])
+
     def test_network_history_is_bounded(self):
         self.store.network_history_max_samples = 3
         for value in range(5):
@@ -255,12 +339,31 @@ class ChartTests(unittest.TestCase):
             {"timestamp": at(6000), "ping_ms": None, "loss_percent": 100.0},
             {"timestamp": at(7200), "ping_ms": 40.0, "speed_measured": True, "download_mbps": None},
         ]
-        series = chart_series(history, 7200, 3600)
+        history[1]["modem_ms"] = 3.0
+        history[3]["modem_ms"] = None
+        older_modem = [
+            {"timestamp": at(4000), "latency_ms": 2.0},
+            {"timestamp": at(6000), "latency_ms": 9.0},  # already covered by the history
+        ]
+        series = chart_series(history, 7200, 3600, older_modem)
         self.assertEqual([value for _, value in series["ping"]], [30.0, None, 40.0])
         self.assertEqual(series["speed"], [(1 - 2200 / 3600, 12.0)])
-        self.assertEqual(len(series["lost"]), 2)
+        self.assertEqual([value for _, value in series["modem"]], [2.0, 3.0, None])
         self.assertEqual(nice_ceiling(130, 50), 200.0)
         self.assertEqual(nice_ceiling(3, 5), 5.0)
+
+    def test_signal_quality_bands_feed_the_strip(self):
+        from datetime import datetime, timezone
+
+        from gui.src.network_chart import chart_series, signal_quality
+
+        self.assertEqual(signal_quality(-87, 13), "good")
+        self.assertEqual(signal_quality(-100, 13), "fair")
+        self.assertEqual(signal_quality(-87, -2), "weak")
+        self.assertIsNone(signal_quality(None, None))
+        stamp = datetime.fromtimestamp(3000, timezone.utc).isoformat()
+        series = chart_series([{"timestamp": stamp, "ping_ms": 30.0, "rsrp": -110, "sinr": 5}], 3600, 3600)
+        self.assertEqual(series["signal"], [(1 - 600 / 3600, "weak")])
 
     def test_connection_status_text_is_localized(self):
         from gui.src.control_panel import connection_status_text

@@ -235,12 +235,24 @@ class RuntimeStatusStore:
             history = self.load_network_history()
             history.append(record)
             history = history[-self.network_history_max_samples:]
-            temporary_path = self.network_history_path.with_suffix(f".json.{os.getpid()}.tmp")
-            with temporary_path.open("w", encoding="utf-8") as history_file:
-                json.dump(history, history_file, ensure_ascii=False, separators=(",", ":"))
-                history_file.flush()
-                os.fsync(history_file.fileno())
-            os.replace(temporary_path, self.network_history_path)
+            self._write_network_history_unlocked(history)
+
+    def annotate_last_network_sample(self, **fields: Any) -> None:
+        """Add values measured later in the same run (modem signal) to the newest sample."""
+        with self._locked():
+            history = self.load_network_history()
+            if not history:
+                return
+            history[-1].update(fields)
+            self._write_network_history_unlocked(history)
+
+    def _write_network_history_unlocked(self, history: list[dict[str, Any]]) -> None:
+        temporary_path = self.network_history_path.with_suffix(f".json.{os.getpid()}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as history_file:
+            json.dump(history, history_file, ensure_ascii=False, separators=(",", ":"))
+            history_file.flush()
+            os.fsync(history_file.fileno())
+        os.replace(temporary_path, self.network_history_path)
 
     def clear_events(self) -> None:
         """Clear event history while excluding concurrent worker writes."""
