@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Callable, Sequence
 
@@ -16,6 +17,9 @@ SLOW_COLOR = "#dc2626"
 GRID_COLOR = "#d4d4d8"
 TEXT_COLOR = "#52525b"
 FAIR_COLOR = "#eab308"
+OUTAGE_COLOR = "#fde2e1"
+PING_FLOOR_MS = 5.0
+MAX_GAP_SECONDS = 300  # break lines across missing samples (worker or host down)
 MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM = 60, 72, 10, 36
 SIGNAL_STRIP_HEIGHT = 8
 
@@ -100,6 +104,33 @@ def chart_series(
     return series
 
 
+def ping_axis_max(values: Sequence[float]) -> float:
+    """Top of the logarithmic ms axis: the next power of ten, at least 1000 ms."""
+    peak = max(values, default=0.0)
+    return float(max(1000, 10 ** math.ceil(math.log10(max(peak, 1.0) * 1.1))))
+
+
+def ping_fraction(value: float, axis_max: float) -> float:
+    """Height share on a log scale, so 40 ms and 1,800 ms are both readable."""
+    clamped = min(max(value, PING_FLOOR_MS), axis_max)
+    return math.log10(clamped / PING_FLOOR_MS) / math.log10(axis_max / PING_FLOOR_MS)
+
+
+def outage_spans(points: Sequence[tuple[float, float | None]]) -> list[tuple[float, float]]:
+    """Window-fraction spans where internet probes failed, up to the next sample."""
+    spans: list[tuple[float, float]] = []
+    start: float | None = None
+    for position, value in points:
+        if value is None and start is None:
+            start = position
+        elif value is not None and start is not None:
+            spans.append((start, position))
+            start = None
+    if start is not None:
+        spans.append((start, 1.0))
+    return spans
+
+
 class NetworkChart(ttk.Frame):
     def __init__(self, parent: tk.Misc, translate: Callable[..., str]) -> None:
         super().__init__(parent)
@@ -119,6 +150,9 @@ class NetworkChart(ttk.Frame):
             (FAIR_COLOR, "chart_legend_signal"),
         ):
             tk.Label(toolbar, text="● " + self.t(key), foreground=color).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(toolbar, text="  " + self.t("chart_legend_outage") + "  ", background=OUTAGE_COLOR).pack(
+            side=tk.LEFT, padx=(0, 12)
+        )
         for key in reversed(tuple(WINDOWS)):
             ttk.Radiobutton(
                 toolbar,
@@ -186,7 +220,7 @@ class NetworkChart(ttk.Frame):
 
         pings = [v for _, v in series["ping"] + series["modem"] if v is not None]
         speeds = [v for _, v in series["speed"] if v is not None]
-        ping_max = nice_ceiling(max(pings) * 1.1 if pings else 100, 50)
+        ping_max = ping_axis_max(pings)
         speed_max = nice_ceiling(max(speeds + [self._slow_mbps or 0]) * 1.1 if speeds else 10, 5)
 
         def x_of(position: float) -> float:
@@ -195,13 +229,28 @@ class NetworkChart(ttk.Frame):
         def y_of(value: float, maximum: float) -> float:
             return bottom - min(value, maximum) / maximum * (bottom - top)
 
+        def ping_y(value: float) -> float:
+            return bottom - ping_fraction(value, ping_max) * (bottom - top)
+
+        # Internet-unreachable periods first, so every line stays on top.
+        for start, end in outage_spans(series["ping"]):
+            canvas.create_rectangle(
+                x_of(start), top, max(x_of(end), x_of(start) + 2), bottom,
+                fill=OUTAGE_COLOR, outline="",
+            )
+
         small = ("TkDefaultFont", 8)
-        for fraction in (0, 0.5, 1):
-            y = bottom - fraction * (bottom - top)
+        canvas.create_line(left, bottom, right, bottom, fill=GRID_COLOR)
+        tick = 10.0
+        while tick <= ping_max:
+            y = ping_y(tick)
             canvas.create_line(left, y, right, y, fill=GRID_COLOR)
-            ping_label = f"{ping_max * fraction:.0f}" + (" ms" if fraction == 1 else "")
+            label = f"{tick:.0f}" + (" ms" if tick == ping_max else "")
+            canvas.create_text(left - 6, y, text=label, anchor=tk.E, fill=TEXT_COLOR, font=small)
+            tick *= 10
+        for fraction in (0, 1):
+            y = bottom - fraction * (bottom - top)
             speed_label = f"{speed_max * fraction:.0f}" + (" Mbit/s" if fraction == 1 else "")
-            canvas.create_text(left - 6, y, text=ping_label, anchor=tk.E, fill=TEXT_COLOR, font=small)
             canvas.create_text(right + 6, y, text=speed_label, anchor=tk.W, fill=SPEED_COLOR, font=small)
         strip_top = bottom + 5
         canvas.create_text(left - 6, strip_top + SIGNAL_STRIP_HEIGHT / 2, text="4G", anchor=tk.E, fill=TEXT_COLOR, font=small)
@@ -220,28 +269,36 @@ class NetworkChart(ttk.Frame):
         # Threshold lines only when they fall inside the visible range, so a
         # high reboot threshold does not flatten normal 20-50 ms values.
         if self._modem_threshold_ms and self._modem_threshold_ms <= ping_max:
-            y = y_of(self._modem_threshold_ms, ping_max)
+            y = ping_y(self._modem_threshold_ms)
             canvas.create_line(left, y, right, y, fill=SLOW_COLOR, dash=(4, 3))
         if self._slow_mbps:
             y = y_of(self._slow_mbps, speed_max)
             canvas.create_line(left, y, right, y, fill=SPEED_COLOR, dash=(4, 3))
 
-        for name, color in (("modem", MODEM_COLOR), ("ping", PING_COLOR)):
+        for name, color, line_width in (("modem", MODEM_COLOR, 1.5), ("ping", PING_COLOR, 2)):
             segment: list[float] = []
+            previous: float | None = None
             for position, value in series[name] + [(2.0, None)]:
+                gap = previous is not None and (position - previous) * window > MAX_GAP_SECONDS
+                previous = position
+                if gap and value is not None and len(segment) >= 2:
+                    # No samples for a while: end the line instead of bridging the gap.
+                    if len(segment) >= 4:
+                        canvas.create_line(*segment, fill=color, width=line_width)
+                    segment = []
                 if value is None:
                     if len(segment) >= 4:
-                        canvas.create_line(*segment, fill=color, width=1.5)
+                        canvas.create_line(*segment, fill=color, width=line_width)
                     elif len(segment) == 2:
                         x, y = segment
                         canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline="")
-                    if position <= 1:
-                        # A failed probe: short red tick on the baseline.
+                    if name == "modem" and position <= 1:
+                        # Modem did not answer: short red tick on the baseline.
                         x = x_of(position)
                         canvas.create_line(x, bottom, x, bottom - 6, fill=SLOW_COLOR, width=2)
                     segment = []
                     continue
-                segment += [x_of(position), y_of(value, ping_max)]
+                segment += [x_of(position), ping_y(value)]
 
         for position, value in series["speed"]:
             x, y = x_of(position), y_of(value, speed_max)

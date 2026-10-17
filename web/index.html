@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>O2 SMS</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1 data-i18n="app_title">O2 SMS</h1>
+    <div class="header-right">
+      <span id="updated" class="muted"></span>
+      <label class="muted"><span data-i18n="language"></span>
+        <select id="language" aria-label="Language"></select>
+      </label>
+    </div>
+  </header>
+
+  <section class="cards">
+    <div class="card"><span class="label" data-i18n="last_sms"></span><span id="last-sms" class="value">-</span></div>
+    <div class="card"><span class="label" data-i18n="today_sent"></span><span id="today-sms" class="value">-</span></div>
+    <div class="card"><span class="label" data-i18n="total_sent"></span><span id="total-sms" class="value">-</span></div>
+    <div class="card"><span class="label" data-i18n="today_usage"></span><span id="usage" class="value">-</span></div>
+    <div class="card"><span class="label" data-i18n="last_check"></span><span id="last-check" class="value">-</span></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 data-i18n="network_chart"></h2>
+      <div class="windows" role="group">
+        <button type="button" data-window="3600" data-i18n="chart_window_1h"></button>
+        <button type="button" data-window="21600" data-i18n="chart_window_6h" class="active"></button>
+        <button type="button" data-window="86400" data-i18n="chart_window_24h"></button>
+      </div>
+    </div>
+    <p id="summary" class="muted"></p>
+    <ul class="legend">
+      <li><span class="dot modem"></span><span data-i18n="chart_legend_modem"></span></li>
+      <li><span class="dot ping"></span><span data-i18n="chart_legend_internet"></span></li>
+      <li><span class="dot speed"></span><span data-i18n="chart_legend_speed"></span></li>
+      <li><span class="swatch outage"></span><span data-i18n="chart_legend_outage"></span></li>
+      <li><span class="swatch signal"></span><span data-i18n="chart_legend_signal"></span></li>
+    </ul>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <section class="panel">
+    <h2 data-i18n="current_details"></h2>
+    <dl class="details">
+      <dt data-i18n="connection_status"></dt><dd id="connection">-</dd>
+      <dt data-i18n="last_reason"></dt><dd id="reason">-</dd>
+      <dt data-i18n="last_error"></dt><dd id="error">-</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2 data-i18n="modem_actions"></h2>
+    <p id="actions-disabled" class="muted" data-i18n="web_actions_disabled" hidden></p>
+    <div id="actions" class="actions">
+      <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="web_password">
+      <button type="button" data-action="send-sms" data-i18n="manual_sms" data-confirm-key="manual_confirm" data-done-key="op_manual_sms"></button>
+      <button type="button" data-action="clear-inbox" data-i18n="clear_inbox" data-confirm-key="clear_inbox_confirm" data-done-key="op_clear_inbox"></button>
+      <button type="button" data-action="restart-modem" data-i18n="restart_modem" data-confirm-key="restart_modem_confirm" data-done-key="op_restart_modem" class="danger"></button>
+    </div>
+    <p id="action-result" role="status"></p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 data-i18n="recent_events"></h2>
+      <label class="muted"><input id="show-routine" type="checkbox"> <span data-i18n="web_show_routine"></span></label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-i18n="time"></th><th data-i18n="event"></th><th data-i18n="description"></th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -11,3 +11,4 @@ Append-only index of ADRs. Decisions are conditional and reviewable - see each r
 | [ADR-0004](./ADR-0004-share-runtime-state-through-bounded-files.md) | Share runtime state through bounded files | accepted | 2026-08-02 | 2027-08-02 |
 | [ADR-0005](./ADR-0005-package-a-localized-desktop-control-panel.md) | Package a localized desktop control panel | under-review | 2026-08-02 | 2027-02-02 |
 | [ADR-0006](./ADR-0006-recover-slow-connections-with-escalating-restarts.md) | Recover slow connections with escalating, capped modem restarts | accepted | 2026-10-06 | 2027-04-06 |
+| [ADR-0007](./ADR-0007-serve-an-optional-lan-web-panel.md) | Serve an optional LAN web panel from the worker container | accepted | 2026-10-16 | 2027-04-16 |

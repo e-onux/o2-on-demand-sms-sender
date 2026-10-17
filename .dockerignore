@@ -11,7 +11,10 @@ last_sms_info.txt
 gui/.venv-build
 gui/.build-work
 gui/build
-gui
+# Only the shared translations (gui/src) are needed in the image, for the web panel
+gui/*
+!gui/__init__.py
+!gui/src
 
 *.app
 *.dmg

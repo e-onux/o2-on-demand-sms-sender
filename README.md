@@ -144,6 +144,27 @@ Platform builds are written under `gui/build`. Build and installation details
 are documented in [gui/README.md](gui/README.md). Docker Desktop or Docker Engine
 must be running for service controls and status collection.
 
+## Web panel (optional)
+
+![Web panel](docs/images/web-panel.png)
+
+A browser alternative to the desktop panel runs inside the worker container
+when `WEB_PANEL_ENABLED=true` (port `WEB_PANEL_PORT`, default 8095), for example
+`http://homenas.local:8095` from any device on the home network. It shows the
+status cards, the ping/speed/4G chart and recent events without a password.
+The modem actions (send `WEITER`, clear the SMS inbox, restart the modem) need
+`WEB_PANEL_PASSWORD`; without it they are disabled. Five wrong passwords lock a
+client out for five minutes. The page uses the same five languages as the
+desktop panel (picked from the browser, the language menu or `?lang=de`). The
+panel is plain HTTP for the home network only;
+do not forward its port on the router. Docker controls stay in the desktop app.
+
+```dotenv
+WEB_PANEL_ENABLED=true
+WEB_PANEL_PASSWORD=choose-a-long-password
+WEB_PANEL_PORT=8095
+```
+
 ## Tests
 
 ```bash

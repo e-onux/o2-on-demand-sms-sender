@@ -57,3 +57,10 @@ capabilities:
     depends_on: [record-runtime-status, renew-highspeed-data]
     implementation: [connection_watchdog.py, o2_on_demand_hack.py]
     tests: [tests/test_connection_watchdog.py]
+  - id: serve-web-panel
+    status: active
+    owner: web-panel
+    path: capabilities/serve-web-panel
+    depends_on: [record-runtime-status, execute-manual-modem-actions]
+    implementation: [web_panel.py, web/index.html, web/app.js, web/style.css]
+    tests: [tests/test_web_panel.py]

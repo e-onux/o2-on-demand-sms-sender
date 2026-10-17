@@ -8,6 +8,7 @@
 | [execute-manual-modem-actions](./execute-manual-modem-actions/contract.yaml) | Send a confirmed renewal or clear SMS storage on request. | `tests.test_worker_usage`, fake-client coverage | Explicitly approve and observe a real action. |
 | [observe-service-status](./observe-service-status/contract.yaml) | Show usage, actions, events, errors and bounded Docker logs. | `tests.test_runtime_status` | Compare the GUI with the current Docker worker state. |
 | [recover-slow-connection](./recover-slow-connection/contract.yaml) | Detect sustained slowness, send WEITER once, then restart the modem on a capped, escalating schedule. | `tests.test_connection_watchdog` | Watch one real slow episode in the GUI chart and events. |
+| [serve-web-panel](./serve-web-panel/contract.yaml) | Optional LAN browser panel: status, chart, events and password-protected modem actions. | `tests.test_web_panel` | Open http://homenas.local:8095 from another device and run one confirmed action. |
 | [operate-docker-service](./operate-docker-service/contract.yaml) | Pull, start, stop and restart the Compose service. | `tests.test_runtime_status` command parsing | Explicitly invoke each lifecycle action on the host. |
 | [manage-desktop-lifecycle](./manage-desktop-lifecycle/contract.yaml) | Localize, package, auto-start, minimize and restore the desktop app. | `tests.test_runtime_status` | Validate packaged builds and tray/login behavior on macOS, Windows and Linux. |
 
