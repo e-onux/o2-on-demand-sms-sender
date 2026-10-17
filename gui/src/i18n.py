@@ -264,6 +264,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "signal_good": {"tr": "iyi", "en": "good", "de": "gut", "pl": "dobry", "ru": "хороший"},
     "signal_fair": {"tr": "orta", "en": "fair", "de": "mittel", "pl": "średni", "ru": "средний"},
     "signal_weak": {"tr": "zayıf", "en": "weak", "de": "schwach", "pl": "słaby", "ru": "слабый"},
+    "chart_legend_outage": {"tr": "İnternet yok", "en": "No internet", "de": "Kein Internet", "pl": "Brak internetu", "ru": "Нет интернета"},
+    "web_updated": {"tr": "Güncellendi: {time}", "en": "Updated: {time}", "de": "Aktualisiert: {time}", "pl": "Zaktualizowano: {time}", "ru": "Обновлено: {time}"},
+    "web_connection_error": {"tr": "Bağlantı hatası: {error}", "en": "Connection error: {error}", "de": "Verbindungsfehler: {error}", "pl": "Błąd połączenia: {error}", "ru": "Ошибка соединения: {error}"},
+    "web_password": {"tr": "Panel şifresi", "en": "Panel password", "de": "Panel-Passwort", "pl": "Hasło panelu", "ru": "Пароль панели"},
+    "web_actions_disabled": {"tr": "İşlemler kapalı: sunucuda WEB_PANEL_PASSWORD tanımlı değil.", "en": "Actions are disabled: WEB_PANEL_PASSWORD is not set on the server.", "de": "Aktionen sind deaktiviert: WEB_PANEL_PASSWORD ist auf dem Server nicht gesetzt.", "pl": "Działania są wyłączone: na serwerze nie ustawiono WEB_PANEL_PASSWORD.", "ru": "Действия отключены: на сервере не задан WEB_PANEL_PASSWORD."},
+    "web_show_routine": {"tr": "Rutin kontrolleri göster", "en": "Show routine checks", "de": "Routineprüfungen anzeigen", "pl": "Pokaż rutynowe kontrole", "ru": "Показывать плановые проверки"},
+    "web_wrong_password": {"tr": "Şifre yanlış.", "en": "Wrong password.", "de": "Falsches Passwort.", "pl": "Nieprawidłowe hasło.", "ru": "Неверный пароль."},
+    "web_locked_out": {"tr": "Çok fazla hatalı deneme; birkaç dakika sonra tekrar deneyin.", "en": "Too many wrong attempts; try again in a few minutes.", "de": "Zu viele Fehlversuche; versuchen Sie es in einigen Minuten erneut.", "pl": "Zbyt wiele błędnych prób; spróbuj ponownie za kilka minut.", "ru": "Слишком много неверных попыток; повторите через несколько минут."},
+    "web_busy": {"tr": "Başka bir işlem sürüyor.", "en": "Another action is running.", "de": "Eine andere Aktion läuft.", "pl": "Trwa inne działanie.", "ru": "Выполняется другое действие."},
+    "web_modem_summary": {"tr": "Modem: {latency:.0f} ms", "en": "Modem: {latency:.0f} ms", "de": "Modem: {latency:.0f} ms", "pl": "Modem: {latency:.0f} ms", "ru": "Модем: {latency:.0f} мс"},
     "refreshed": {"tr": "Bilgiler yenilendi.", "en": "Information refreshed.", "de": "Informationen aktualisiert.", "pl": "Informacje odświeżone.", "ru": "Информация обновлена."},
 }
 

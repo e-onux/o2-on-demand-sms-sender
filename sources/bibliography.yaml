@@ -117,6 +117,8 @@ sources:
       - manage-desktop-lifecycle
       - recover-slow-connection
       - ADR-0006
+      - serve-web-panel
+      - ADR-0007
     relevance:
       claim: Synthetic tests exercise existing behavior without sending SMS, deleting a real inbox or mutating host startup state.
       confidence: high

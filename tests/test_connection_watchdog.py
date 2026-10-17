@@ -352,6 +352,21 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(nice_ceiling(130, 50), 200.0)
         self.assertEqual(nice_ceiling(3, 5), 5.0)
 
+    def test_log_ping_axis_keeps_low_and_high_values_readable(self):
+        from gui.src.network_chart import outage_spans, ping_axis_max, ping_fraction
+
+        # Observed 2026-10-13: modem spikes to 1,786 ms hid 40-80 ms internet ping.
+        axis = ping_axis_max([44.0, 80.0, 1786.0])
+        self.assertEqual(axis, 10000.0)
+        self.assertGreater(ping_fraction(44.0, axis), 0.25)
+        self.assertLess(ping_fraction(44.0, axis), ping_fraction(1786.0, axis))
+        self.assertEqual(ping_axis_max([]), 1000.0)
+        self.assertEqual(ping_fraction(1.0, 1000.0), 0.0)
+        self.assertEqual(
+            outage_spans([(0.1, 30.0), (0.2, None), (0.3, None), (0.4, 35.0), (0.9, None)]),
+            [(0.2, 0.4), (0.9, 1.0)],
+        )
+
     def test_signal_quality_bands_feed_the_strip(self):
         from datetime import datetime, timezone
 
@@ -364,6 +379,17 @@ class ChartTests(unittest.TestCase):
         stamp = datetime.fromtimestamp(3000, timezone.utc).isoformat()
         series = chart_series([{"timestamp": stamp, "ping_ms": 30.0, "rsrp": -110, "sinr": 5}], 3600, 3600)
         self.assertEqual(series["signal"], [(1 - 600 / 3600, "weak")])
+
+    def test_worker_threshold_reason_is_translated(self):
+        from gui.src.control_panel import ControlPanel
+
+        panel = ControlPanel.__new__(ControlPanel)
+        panel.language = "en"
+        status = {"last_sms_reason": "1.90 GiB yeni veri kullanım eşiği aşıldı.", "threshold_gb": 1.9}
+        self.assertEqual(
+            ControlPanel._localized_sms_reason(panel, status),
+            "The new-data threshold of 1.90 GiB was exceeded.",
+        )
 
     def test_connection_status_text_is_localized(self):
         from gui.src.control_panel import connection_status_text

@@ -888,7 +888,7 @@ class ControlPanel(tk.Tk):
         normalized = reason.casefold()
         if "manuel" in normalized or "manually" in normalized:
             return self.t("runtime_manual_sms")
-        if "eşik" in normalized or "threshold" in normalized:
+        if "eşik" in normalized or "eşiğ" in normalized or "threshold" in normalized:
             return self.t("runtime_threshold", threshold=float(status.get("threshold_gb", 0)))
         return reason
 
@@ -936,7 +936,7 @@ class ControlPanel(tk.Tk):
             normalized = message.casefold()
             if "manuel" in normalized or "manually" in normalized:
                 return self.t("runtime_manual_sms")
-            if "eşik" in normalized or "threshold" in normalized:
+            if "eşik" in normalized or "eşiğ" in normalized or "threshold" in normalized:
                 return self.t("runtime_threshold", threshold=float(event.get("threshold_gb", 0)))
         return str(event.get("message", ""))
 

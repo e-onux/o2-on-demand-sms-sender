@@ -1,0 +1,88 @@
+id: serve-web-panel
+title: Serve an optional browser panel on the LAN
+owner: web-panel
+version: 1.0.0
+status: active
+
+intent:
+  description: >
+    Offer a browser alternative to the desktop control panel so any LAN device can watch status, the
+    ping/speed/4G chart and recent events, and, with a password, run the same confirmed modem actions.
+
+responsibility:
+  does:
+    - serve status, network history and the newest 100 events as JSON, plus three fixed static files
+    - run send-sms, clear-inbox or restart-modem through modem_actions.py after password checks
+    - refuse actions while WEB_PANEL_PASSWORD is empty
+    - require the custom X-Panel-Password header so cross-site pages cannot trigger actions
+    - lock a client out for 5 minutes after 5 wrong passwords and run one action at a time
+    - send a strict Content-Security-Policy, no-frame and no-store headers
+    - serve the desktop panel's translations for one of five languages (English fallback)
+  does_not:
+    - open a modem session itself
+    - control Docker (the panel runs inside the worker container)
+    - expose credentials or serve any file outside the three static files
+    - provide TLS (LAN-only plain HTTP; use a reverse proxy for anything wider)
+
+inputs:
+  request:
+    type: object
+    required: true
+    description: "HTTP method, path and the optional X-Panel-Password header."
+
+outputs:
+  status_code:
+    type: integer
+  body:
+    type: object
+
+examples:
+  - name: Read-only status needs no password
+    input: { request: { method: GET, path: /api/status } }
+    expected: { status_code: 200, body: { web_actions_enabled: true } }
+  - name: Correct password runs one restart
+    input: { request: { method: POST, path: /api/actions/restart-modem, password: correct } }
+    expected: { status_code: 200, body: { ok: true, action: restart-modem } }
+  - name: Cross-site POST without the header is refused
+    input: { request: { method: POST, path: /api/actions/restart-modem } }
+    expected_error: { code: MISSING_HEADER, status_code: 403 }
+  - name: Sixth wrong password inside 5 minutes is locked out
+    input: { request: { method: POST, path: /api/actions/send-sms, password: wrong, attempt: 6 } }
+    expected_error: { code: LOCKED_OUT, status_code: 429 }
+
+invariants:
+  - no action runs without the exact configured password
+  - at most one modem action runs at a time
+  - only "/", "/app.js" and "/style.css" are served from disk
+  - request headers are never written to logs
+
+dependencies:
+  internal: [record-runtime-status, execute-manual-modem-actions]
+  external: [LAN browsers]
+
+implementation: [web_panel.py, web/index.html, web/app.js, web/style.css]
+
+budgets:
+  max_files: 12
+  max_lines_of_code: 800
+  max_direct_dependencies: 16
+  max_public_operations: 3
+  max_database_tables: 3
+  max_external_services: 2
+  max_cyclomatic_complexity: 12
+  max_change_reasons: 1
+
+verification:
+  unit: required
+  contract: required
+  regression: required
+  security: required
+  user_demo: required
+
+review:
+  interval: 3 months
+  next_review: 2027-01-16
+  triggers: [panel exposed beyond the LAN, new action added, authentication scheme changed]
+
+evidence: [source-project-regression-tests]
+decisions: [ADR-0007]

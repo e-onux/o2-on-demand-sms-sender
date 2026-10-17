@@ -29,6 +29,10 @@ services:
       MODEM_RESTART_NOTIFY_ENABLED: ${MODEM_RESTART_NOTIFY_ENABLED:-true}
       MODEM_RESTART_NOTIFY_TO: ${MODEM_RESTART_NOTIFY_TO:-}
       MODEM_RESTART_NOTIFY_TEXT: ${MODEM_RESTART_NOTIFY_TEXT:-Modem yeniden baslatiliyor.}
+      # Optional web panel on port 8095 (actions need WEB_PANEL_PASSWORD)
+      WEB_PANEL_ENABLED: ${WEB_PANEL_ENABLED:-false}
+      WEB_PANEL_PASSWORD: ${WEB_PANEL_PASSWORD:-}
+      WEB_PANEL_PORT: ${WEB_PANEL_PORT:-8095}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       # Persistent statistics and SMS history, shared with control_panel.py
