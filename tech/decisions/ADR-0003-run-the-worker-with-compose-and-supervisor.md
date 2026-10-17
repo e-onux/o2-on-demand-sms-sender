@@ -5,6 +5,7 @@ id: ADR-0003
 title: Run the worker with Docker Compose and supervisord
 status: accepted
 date: 2026-08-02
+superseded_in_part_by: ADR-0008 (networking)
 
 context:
   description: >

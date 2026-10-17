@@ -42,8 +42,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-    # Host network is the most reliable for reaching modem IPs like 192.168.8.1
-    network_mode: "host"
+    # The default bridge network reaches the modem (e.g. 192.168.8.1) through
+    # NAT on Linux, macOS and Windows alike; no host-network setting is needed.
+    ports:
+      - "${WEB_PANEL_PORT:-8095}:${WEB_PANEL_PORT:-8095}"
     restart: unless-stopped
     logging:
       driver: json-file

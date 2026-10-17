@@ -39,7 +39,7 @@ const EVENT_MESSAGE_KEYS = {
   restart_limit_reached: "runtime_restart_limit_reached",
 };
 const ACTION_ERROR_KEYS = {
-  wrong_password: "web_wrong_password",
+  auth_failed: "web_wrong_password",
   locked_out: "web_locked_out",
   busy: "web_busy",
   actions_disabled: "web_actions_disabled",
@@ -183,26 +183,45 @@ function renderStatus(status) {
   $("actions").hidden = !status.web_actions_enabled;
 }
 
-function renderSummary(history, status) {
+const STALE_SECONDS = 300;
+
+// One word for the line's state, from the newest evidence first.
+function lineState(status, history) {
+  const checked = Date.parse(status.last_check_at || "");
+  if (!Number.isNaN(checked) && Date.now() - checked > STALE_SECONDS * 1000) return ["bad", "web_state_stale"];
+  const last = history[history.length - 1];
+  const recent = last && Date.now() - Date.parse(last.timestamp) < STALE_SECONDS * 1000;
+  if (recent && typeof last.ping_ms !== "number") return ["bad", "web_state_offline"];
+  const phase = status.connection_watchdog && status.connection_watchdog.phase;
+  if (["degraded", "sms_wait", "restart_wait"].includes(phase) || status.connection_verdict === "slow") {
+    return ["warn", "web_state_slow"];
+  }
+  return ["ok", "web_state_ok"];
+}
+
+function renderReadout(history, status) {
+  const [level, key] = lineState(status, history);
+  $("state").dataset.level = level;
+  $("state-text").textContent = t(key);
+
   const last = history[history.length - 1] || {};
-  const speeds = history.filter((r) => r.speed_measured);
+  const speeds = history.filter((r) => r.speed_measured && typeof r.download_mbps === "number");
   const speed = speeds.length ? speeds[speeds.length - 1].download_mbps : null;
-  const parts = [];
-  if (typeof status.modem_latency_last_ms === "number") {
-    parts.push(t("web_modem_summary", { latency: status.modem_latency_last_ms }));
-  }
-  parts.push(t("chart_summary", {
-    ping: typeof last.ping_ms === "number" ? Math.round(last.ping_ms) : "-",
-    speed: typeof speed === "number" ? speed.toFixed(1) : "-",
-  }));
   const signals = history.filter((r) => signalQuality(r.rsrp, r.sinr));
-  if (signals.length) {
-    const s = signals[signals.length - 1];
-    parts.push(t("chart_signal_summary", {
-      rsrp: s.rsrp ?? "-", sinr: s.sinr ?? "-", quality: t(`signal_${signalQuality(s.rsrp, s.sinr)}`),
-    }));
-  }
-  $("summary").textContent = parts.join(" · ");
+  const signal = signals.length ? signals[signals.length - 1] : {};
+  const modem = status.modem_latency_last_ms;
+  const slowMbps = status.connection_slow_threshold_mbps;
+
+  $("g-modem").textContent = typeof modem === "number" ? Math.round(modem) : "-";
+  $("g-ping").textContent = typeof last.ping_ms === "number" ? Math.round(last.ping_ms) : "-";
+  $("g-speed").textContent = typeof speed === "number" ? speed.toFixed(1) : "-";
+  $("g-speed").classList.toggle("is-bad", typeof speed === "number" && Boolean(slowMbps) && speed < slowMbps);
+  $("g-rsrp").textContent = typeof signal.rsrp === "number" ? String(signal.rsrp).replace("-", "\u2212") : "-";
+  const quality = signalQuality(signal.rsrp, signal.sinr);
+  $("g-signal-key").dataset.quality = quality || "";
+  $("g-sinr").textContent = quality
+    ? `SINR ${signal.sinr ?? "-"} dB · ${t(`signal_${quality}`)}`
+    : "";
 }
 
 function renderEvents(events) {
@@ -263,12 +282,12 @@ function drawChart() {
 
   const { status, history } = latest;
   const series = chartSeries(history, status.modem_latency_history, Date.now() / 1000);
-  const left = 52, right = width - 52, top = 10, bottom = height - 34;
+  const left = 64, right = width - 72, top = 10, bottom = height - 34;
   const x = (p) => left + p * (right - left);
-  ctx.font = "11px sans-serif";
+  ctx.font = `500 11px ${css("--font-mono")}`;
 
   if (!series.ping.length && !series.modem.length && !series.speed.length) {
-    ctx.fillStyle = css("--muted");
+    ctx.fillStyle = css("--ink-soft");
     ctx.textAlign = "center";
     ctx.fillText(t("chart_no_data"), width / 2, height / 2);
     return;
@@ -298,7 +317,7 @@ function drawChart() {
   }
 
   ctx.strokeStyle = css("--grid");
-  ctx.fillStyle = css("--muted");
+  ctx.fillStyle = css("--ink-soft");
   ctx.lineWidth = 1;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
@@ -309,23 +328,23 @@ function drawChart() {
   }
   ctx.beginPath(); ctx.moveTo(left, bottom); ctx.lineTo(right, bottom); ctx.stroke();
   ctx.textAlign = "left";
-  ctx.fillStyle = css("--speed");
+  ctx.fillStyle = css("--good");
   ctx.fillText(`${speedTop} Mbit/s`, right + 6, top);
   ctx.fillText("0", right + 6, bottom);
 
   ctx.setLineDash([4, 3]);
   const threshold = status.modem_latency_threshold_ms;
   if (threshold && threshold <= pingMax) {
-    ctx.strokeStyle = css("--slow");
+    ctx.strokeStyle = css("--bad");
     ctx.beginPath(); ctx.moveTo(left, pingY(threshold)); ctx.lineTo(right, pingY(threshold)); ctx.stroke();
   }
   if (slowMbps) {
-    ctx.strokeStyle = css("--speed");
+    ctx.strokeStyle = css("--good");
     ctx.beginPath(); ctx.moveTo(left, speedY(slowMbps)); ctx.lineTo(right, speedY(slowMbps)); ctx.stroke();
   }
   ctx.setLineDash([]);
 
-  for (const [name, color, lineWidth] of [["modem", "--modem", 1.5], ["ping", "--ping", 2]]) {
+  for (const [name, color, lineWidth] of [["modem", "--modem", 1.25], ["ping", "--accent", 2]]) {
     ctx.strokeStyle = css(color);
     ctx.lineWidth = lineWidth;
     let drawing = false;
@@ -337,7 +356,7 @@ function drawChart() {
       if (v === null) {
         drawing = false;
         if (name === "modem") {
-          ctx.save(); ctx.strokeStyle = css("--slow"); ctx.lineWidth = 2;
+          ctx.save(); ctx.strokeStyle = css("--bad"); ctx.lineWidth = 2;
           ctx.stroke(); ctx.beginPath(); ctx.moveTo(x(p), bottom); ctx.lineTo(x(p), bottom - 6); ctx.stroke();
           ctx.restore(); ctx.beginPath();
         }
@@ -349,20 +368,30 @@ function drawChart() {
     ctx.stroke();
   }
 
+  // Emphasise the newest reading of each line so "now" is easy to find.
+  for (const [name, color] of [["modem", "--modem"], ["ping", "--accent"]]) {
+    const last = [...series[name]].reverse().find(([, v]) => v !== null);
+    if (!last) continue;
+    ctx.fillStyle = css("--plate");
+    ctx.beginPath(); ctx.arc(x(last[0]), pingY(last[1]), 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = css(color);
+    ctx.beginPath(); ctx.arc(x(last[0]), pingY(last[1]), 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
   for (const [p, v] of series.speed) {
-    ctx.fillStyle = slowMbps && v < slowMbps ? css("--slow") : css("--speed");
+    ctx.fillStyle = slowMbps && v < slowMbps ? css("--bad") : css("--good");
     ctx.beginPath(); ctx.arc(x(p), speedY(v), 3.5, 0, Math.PI * 2); ctx.fill();
   }
 
   const stripTop = bottom + 5;
-  const colors = { good: css("--speed"), fair: css("--fair"), weak: css("--slow") };
+  const colors = { good: css("--good"), fair: css("--warn"), weak: css("--bad") };
   series.signal.forEach(([p, quality], i) => {
     const next = i + 1 < series.signal.length ? series.signal[i + 1][0] : 1;
     const end = Math.min(next, p + 300 / windowSeconds, 1);
     ctx.fillStyle = colors[quality];
     ctx.fillRect(x(p), stripTop, Math.max(1, x(end) - x(p)), 8);
   });
-  ctx.fillStyle = css("--muted");
+  ctx.fillStyle = css("--ink-soft");
   ctx.textAlign = "right";
   ctx.fillText("4G", left - 6, stripTop + 4);
   ctx.textBaseline = "alphabetic";
@@ -394,16 +423,31 @@ async function refresh() {
 
 function render() {
   renderStatus(latest.status);
-  renderSummary(latest.history, latest.status);
+  renderReadout(latest.history, latest.status);
   renderEvents(latestEvents);
   drawChart();
 }
 
+let pendingAction = null;
+
+function askConfirmation(button) {
+  pendingAction = button;
+  $("confirm-text").textContent = t(button.dataset.confirmKey);
+  $("confirm").hidden = false;
+  $("confirm-no").focus();
+}
+
+function closeConfirmation() {
+  const button = pendingAction;
+  pendingAction = null;
+  $("confirm").hidden = true;
+  if (button) button.focus();
+}
+
 async function runAction(button) {
-  if (!window.confirm(t(button.dataset.confirmKey))) return;
   const title = t(button.dataset.doneKey);
   const result = $("action-result");
-  const buttons = document.querySelectorAll("[data-action]");
+  const buttons = document.querySelectorAll("[data-action], #confirm button");
   buttons.forEach((b) => { b.disabled = true; });
   result.textContent = t("action_running", { title });
   try {
@@ -423,15 +467,28 @@ async function runAction(button) {
   }
 }
 
+$("confirm-yes").addEventListener("click", () => {
+  const button = pendingAction;
+  closeConfirmation();
+  if (button) runAction(button);
+});
+$("confirm-no").addEventListener("click", closeConfirmation);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && pendingAction) closeConfirmation();
+});
+
 document.querySelectorAll("[data-window]").forEach((button) => {
   button.addEventListener("click", () => {
     windowSeconds = Number(button.dataset.window);
-    document.querySelectorAll("[data-window]").forEach((b) => b.classList.toggle("active", b === button));
+    document.querySelectorAll("[data-window]").forEach((b) => {
+      b.classList.toggle("active", b === button);
+      b.setAttribute("aria-pressed", String(b === button));
+    });
     drawChart();
   });
 });
 document.querySelectorAll("[data-action]").forEach((button) => {
-  button.addEventListener("click", () => runAction(button));
+  button.addEventListener("click", () => askConfirmation(button));
 });
 $("show-routine").addEventListener("change", () => renderEvents(latestEvents));
 $("language").addEventListener("change", async (event) => {

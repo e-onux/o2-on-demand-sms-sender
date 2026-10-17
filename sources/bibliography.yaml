@@ -119,6 +119,7 @@ sources:
       - ADR-0006
       - serve-web-panel
       - ADR-0007
+      - ADR-0008
     relevance:
       claim: Synthetic tests exercise existing behavior without sending SMS, deleting a real inbox or mutating host startup state.
       confidence: high
@@ -176,3 +177,22 @@ sources:
         - Undocumented as a stable public API; the URL is configurable through WATCHDOG_SPEED_URL.
     last_verified: 2026-10-06
     next_review: 2027-01-06
+
+  - id: source-docker-host-network
+    title: Docker host network driver documentation
+    authors: [Docker, Inc.]
+    type: official-documentation
+    url: https://docs.docker.com/engine/network/drivers/host/
+    license: unknown
+    local_copy: null
+    supports: [ADR-0008]
+    relevance:
+      claim: >
+        Docker Desktop supports host networking from 4.34 only after signing in and enabling it under
+        Settings > Resources > Network; containers cannot bind to the host's IP addresses and published ports
+        are ignored.
+      confidence: high
+      limitations:
+        - Docker Desktop behaviour may change between releases.
+    last_verified: 2026-10-17
+    next_review: 2027-04-17

@@ -1,4 +1,4 @@
-# O2 On-Demand SMS — Docker/Portainer & CI
+# O2 On-Demand SMS - Docker/Portainer & CI
 
 This bundle adds **Docker**, **supervisord**, and **GitHub Actions** on top of the original project so you can run it under Portainer and build multi-arch images automatically.
 
@@ -20,12 +20,16 @@ container.
 Docker logs rotate at 5 MB with three files. Runtime event history is compacted
 automatically after 2 MB, retaining at most the newest 2,000 records.
 
-> Using `network_mode: host` is recommended to reach modem IPs (e.g., Huawei at 192.168.8.1) without NAT issues.
+> The default bridge network reaches the modem (e.g. Huawei at 192.168.8.1) through NAT, so no host-network
+> setting is needed. Publish port 8095 when the optional web panel is enabled.
 
 ## Local Docker (optional)
 ```bash
 docker build -t YOUR_DOCKERHUB_USER/o2-ondemand-sms:latest .
-docker run --rm --network host       -e API_USER=xxx -e API_PASSWORD=yyy       -e MODEM_HOST=192.168.8.1 -e INTERVAL_SECONDS=600       YOUR_DOCKERHUB_USER/o2-ondemand-sms:latest
+docker run --rm -p 8095:8095 -v "$PWD/data:/app/data" \
+  -e API_USER=xxx -e API_PASSWORD=yyy -e MODEM_HOST=192.168.8.1 \
+  -e WEB_PANEL_ENABLED=true -e WEB_PANEL_PASSWORD=choose-one \
+  YOUR_DOCKERHUB_USER/o2-ondemand-sms:latest
 ```
 
 ## GitHub Actions (Multi-arch Build)
