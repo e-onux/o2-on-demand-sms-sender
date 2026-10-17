@@ -17,6 +17,7 @@ Security notes for a LAN-only, plain-HTTP service:
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -35,6 +36,8 @@ STATIC_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
+FONT_DIR = STATIC_DIR / "fonts"
+FONT_NAME = re.compile(r"^/fonts/([a-z0-9-]+\.woff2)$")
 ACTIONS = ("send-sms", "clear-inbox", "restart-modem")
 EVENT_LIMIT = 100
 MAX_FAILED_LOGINS = 5
@@ -43,7 +46,7 @@ ACTION_TIMEOUT_SECONDS = 180
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-        "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
@@ -166,6 +169,12 @@ class PanelHandler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), content_type)
             except OSError:
                 self._send(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        elif font_match := FONT_NAME.match(path):
+            font = FONT_DIR / font_match.group(1)
+            if font.is_file():
+                self._send(HTTPStatus.OK, font.read_bytes(), "font/woff2")
+            else:
+                self._send(HTTPStatus.NOT_FOUND, {"error": "not_found"})
         elif path == "/api/status":
             status = read_json(state.data_dir / "status.json", {})
             status = status if isinstance(status, dict) else {}
@@ -201,7 +210,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         if state.locked_out(client):
             return self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "locked_out"})
         if not state.check_password(client, supplied):
-            return self._send(HTTPStatus.UNAUTHORIZED, {"error": "wrong_password"})
+            return self._send(HTTPStatus.UNAUTHORIZED, {"error": "auth_failed"})
         if not state.action_lock.acquire(blocking=False):
             return self._send(HTTPStatus.CONFLICT, {"error": "busy"})
         try:

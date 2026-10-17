@@ -274,6 +274,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "web_locked_out": {"tr": "Çok fazla hatalı deneme; birkaç dakika sonra tekrar deneyin.", "en": "Too many wrong attempts; try again in a few minutes.", "de": "Zu viele Fehlversuche; versuchen Sie es in einigen Minuten erneut.", "pl": "Zbyt wiele błędnych prób; spróbuj ponownie za kilka minut.", "ru": "Слишком много неверных попыток; повторите через несколько минут."},
     "web_busy": {"tr": "Başka bir işlem sürüyor.", "en": "Another action is running.", "de": "Eine andere Aktion läuft.", "pl": "Trwa inne działanie.", "ru": "Выполняется другое действие."},
     "web_modem_summary": {"tr": "Modem: {latency:.0f} ms", "en": "Modem: {latency:.0f} ms", "de": "Modem: {latency:.0f} ms", "pl": "Modem: {latency:.0f} ms", "ru": "Модем: {latency:.0f} мс"},
+    "web_state_ok": {"tr": "Bağlantı normal", "en": "Connection normal", "de": "Verbindung normal", "pl": "Połączenie w normie", "ru": "Соединение в норме"},
+    "web_state_slow": {"tr": "Bağlantı yavaş", "en": "Connection slow", "de": "Verbindung langsam", "pl": "Połączenie wolne", "ru": "Соединение медленное"},
+    "web_state_offline": {"tr": "İnternet yok", "en": "No internet", "de": "Kein Internet", "pl": "Brak internetu", "ru": "Нет интернета"},
+    "web_state_stale": {"tr": "Worker yanıt vermiyor", "en": "Worker not responding", "de": "Worker antwortet nicht", "pl": "Worker nie odpowiada", "ru": "Worker не отвечает"},
+    "web_confirm_yes": {"tr": "Evet, devam et", "en": "Yes, continue", "de": "Ja, fortfahren", "pl": "Tak, kontynuuj", "ru": "Да, продолжить"},
+    "web_cancel": {"tr": "Vazgeç", "en": "Cancel", "de": "Abbrechen", "pl": "Anuluj", "ru": "Отмена"},
+    "web_download": {"tr": "İndirme", "en": "Download", "de": "Download", "pl": "Pobieranie", "ru": "Загрузка"},
+    "web_internet": {"tr": "İnternet", "en": "Internet", "de": "Internet", "pl": "Internet", "ru": "Интернет"},
     "refreshed": {"tr": "Bilgiler yenilendi.", "en": "Information refreshed.", "de": "Informationen aktualisiert.", "pl": "Informacje odświeżone.", "ru": "Информация обновлена."},
 }
 

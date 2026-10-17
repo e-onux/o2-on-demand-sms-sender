@@ -2,82 +2,120 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>O2 SMS</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <h1 data-i18n="app_title">O2 SMS</h1>
-    <div class="header-right">
-      <span id="updated" class="muted"></span>
-      <label class="muted"><span data-i18n="language"></span>
-        <select id="language" aria-label="Language"></select>
-      </label>
-    </div>
-  </header>
-
-  <section class="cards">
-    <div class="card"><span class="label" data-i18n="last_sms"></span><span id="last-sms" class="value">-</span></div>
-    <div class="card"><span class="label" data-i18n="today_sent"></span><span id="today-sms" class="value">-</span></div>
-    <div class="card"><span class="label" data-i18n="total_sent"></span><span id="total-sms" class="value">-</span></div>
-    <div class="card"><span class="label" data-i18n="today_usage"></span><span id="usage" class="value">-</span></div>
-    <div class="card"><span class="label" data-i18n="last_check"></span><span id="last-check" class="value">-</span></div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2 data-i18n="network_chart"></h2>
-      <div class="windows" role="group">
-        <button type="button" data-window="3600" data-i18n="chart_window_1h"></button>
-        <button type="button" data-window="21600" data-i18n="chart_window_6h" class="active"></button>
-        <button type="button" data-window="86400" data-i18n="chart_window_24h"></button>
+  <div class="page">
+    <header class="masthead">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">O2</span>
+        <h1 data-i18n="app_title">O2 SMS</h1>
       </div>
-    </div>
-    <p id="summary" class="muted"></p>
-    <ul class="legend">
-      <li><span class="dot modem"></span><span data-i18n="chart_legend_modem"></span></li>
-      <li><span class="dot ping"></span><span data-i18n="chart_legend_internet"></span></li>
-      <li><span class="dot speed"></span><span data-i18n="chart_legend_speed"></span></li>
-      <li><span class="swatch outage"></span><span data-i18n="chart_legend_outage"></span></li>
-      <li><span class="swatch signal"></span><span data-i18n="chart_legend_signal"></span></li>
-    </ul>
-    <canvas id="chart"></canvas>
-  </section>
+      <div class="masthead-tools">
+        <span id="updated" class="fine"></span>
+        <label class="lang"><span class="sr-only" data-i18n="language"></span>
+          <select id="language"></select>
+        </label>
+      </div>
+    </header>
 
-  <section class="panel">
-    <h2 data-i18n="current_details"></h2>
-    <dl class="details">
-      <dt data-i18n="connection_status"></dt><dd id="connection">-</dd>
-      <dt data-i18n="last_reason"></dt><dd id="reason">-</dd>
-      <dt data-i18n="last_error"></dt><dd id="error">-</dd>
-    </dl>
-  </section>
+    <section class="readout" aria-live="polite">
+      <p id="state" class="state" data-level="ok"><span class="state-dot" aria-hidden="true"></span><span id="state-text">-</span></p>
+      <dl class="gauges">
+        <div class="gauge">
+          <dt><span class="key modem" aria-hidden="true"></span><span data-i18n="chart_legend_modem"></span></dt>
+          <dd><span id="g-modem" class="num">-</span><span class="unit">ms</span></dd>
+        </div>
+        <div class="gauge">
+          <dt><span class="key ping" aria-hidden="true"></span><span data-i18n="web_internet"></span></dt>
+          <dd><span id="g-ping" class="num">-</span><span class="unit">ms</span></dd>
+        </div>
+        <div class="gauge">
+          <dt><span class="key speed" aria-hidden="true"></span><span data-i18n="web_download"></span></dt>
+          <dd><span id="g-speed" class="num">-</span><span class="unit">Mbit/s</span></dd>
+        </div>
+        <div class="gauge">
+          <dt><span id="g-signal-key" class="key signal" aria-hidden="true"></span><span>4G RSRP</span></dt>
+          <dd><span id="g-rsrp" class="num">-</span><span class="unit">dBm</span><span id="g-sinr" class="aside"></span></dd>
+        </div>
+      </dl>
+      <dl class="ledger">
+        <div><dt data-i18n="last_sms"></dt><dd id="last-sms">-</dd></div>
+        <div><dt data-i18n="today_sent"></dt><dd id="today-sms">-</dd></div>
+        <div><dt data-i18n="total_sent"></dt><dd id="total-sms">-</dd></div>
+        <div><dt data-i18n="today_usage"></dt><dd id="usage">-</dd></div>
+        <div><dt data-i18n="last_check"></dt><dd id="last-check">-</dd></div>
+      </dl>
+    </section>
 
-  <section class="panel">
-    <h2 data-i18n="modem_actions"></h2>
-    <p id="actions-disabled" class="muted" data-i18n="web_actions_disabled" hidden></p>
-    <div id="actions" class="actions">
-      <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="web_password">
-      <button type="button" data-action="send-sms" data-i18n="manual_sms" data-confirm-key="manual_confirm" data-done-key="op_manual_sms"></button>
-      <button type="button" data-action="clear-inbox" data-i18n="clear_inbox" data-confirm-key="clear_inbox_confirm" data-done-key="op_clear_inbox"></button>
-      <button type="button" data-action="restart-modem" data-i18n="restart_modem" data-confirm-key="restart_modem_confirm" data-done-key="op_restart_modem" class="danger"></button>
-    </div>
-    <p id="action-result" role="status"></p>
-  </section>
+    <section class="trace">
+      <div class="section-head">
+        <h2 data-i18n="network_chart"></h2>
+        <div class="segmented" role="group">
+          <button type="button" data-window="3600" data-i18n="chart_window_1h"></button>
+          <button type="button" data-window="21600" data-i18n="chart_window_6h" class="active" aria-pressed="true"></button>
+          <button type="button" data-window="86400" data-i18n="chart_window_24h"></button>
+        </div>
+      </div>
+      <ul class="legend">
+        <li><span class="key modem"></span><span data-i18n="chart_legend_modem"></span></li>
+        <li><span class="key ping"></span><span data-i18n="chart_legend_internet"></span></li>
+        <li><span class="key speed"></span><span data-i18n="chart_legend_speed"></span></li>
+        <li><span class="key band"></span><span data-i18n="chart_legend_outage"></span></li>
+        <li><span class="key strip"></span><span data-i18n="chart_legend_signal"></span></li>
+      </ul>
+      <canvas id="chart"></canvas>
+    </section>
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2 data-i18n="recent_events"></h2>
-      <label class="muted"><input id="show-routine" type="checkbox"> <span data-i18n="web_show_routine"></span></label>
+    <div class="columns">
+      <div class="stack">
+        <section>
+          <h2 data-i18n="current_details"></h2>
+          <dl class="details">
+            <div><dt data-i18n="connection_status"></dt><dd id="connection">-</dd></div>
+            <div><dt data-i18n="last_reason"></dt><dd id="reason">-</dd></div>
+            <div><dt data-i18n="last_error"></dt><dd id="error">-</dd></div>
+          </dl>
+        </section>
+
+        <section>
+          <h2 data-i18n="modem_actions"></h2>
+          <p id="actions-disabled" class="fine" data-i18n="web_actions_disabled" hidden></p>
+          <div id="actions" class="actions">
+            <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="web_password">
+            <div class="action-row">
+              <button type="button" data-action="send-sms" data-i18n="manual_sms" data-confirm-key="manual_confirm" data-done-key="op_manual_sms"></button>
+              <button type="button" data-action="clear-inbox" data-i18n="clear_inbox" data-confirm-key="clear_inbox_confirm" data-done-key="op_clear_inbox"></button>
+              <button type="button" data-action="restart-modem" data-i18n="restart_modem" data-confirm-key="restart_modem_confirm" data-done-key="op_restart_modem" class="danger"></button>
+            </div>
+            <div id="confirm" class="confirm" role="alertdialog" aria-labelledby="confirm-text" hidden>
+              <p id="confirm-text"></p>
+              <div class="action-row">
+                <button type="button" id="confirm-yes" class="primary" data-i18n="web_confirm_yes"></button>
+                <button type="button" id="confirm-no" data-i18n="web_cancel"></button>
+              </div>
+            </div>
+          </div>
+          <p id="action-result" class="fine" role="status"></p>
+        </section>
+      </div>
+
+      <section class="log">
+        <div class="section-head">
+          <h2 data-i18n="recent_events"></h2>
+          <label class="toggle"><input id="show-routine" type="checkbox"><span data-i18n="web_show_routine"></span></label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th data-i18n="time"></th><th data-i18n="event"></th><th data-i18n="description"></th></tr></thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th data-i18n="time"></th><th data-i18n="event"></th><th data-i18n="description"></th></tr></thead>
-        <tbody id="events"></tbody>
-      </table>
-    </div>
-  </section>
+  </div>
 
   <script src="/app.js"></script>
 </body>

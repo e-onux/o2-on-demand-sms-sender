@@ -88,6 +88,15 @@ class WebPanelTests(unittest.TestCase):
             for language in LANGUAGES:
                 self.assertTrue(TRANSLATIONS[key].get(language), f"{key}:{language}")
 
+    def test_bundled_fonts_are_served_and_names_are_whitelisted(self):
+        response, body = self.request("GET", "/fonts/plex-sans-latin.woff2")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "font/woff2")
+        self.assertTrue(body.startswith(b"wOF2"))
+        self.assertIn("font-src 'self'", response.getheader("Content-Security-Policy"))
+        for path in ("/fonts/OFL.txt", "/fonts/../web_panel.py", "/fonts/missing.woff2", "/fonts/A.woff2"):
+            self.assertEqual(self.request("GET", path)[0].status, 404, path)
+
     def test_unknown_and_traversal_paths_are_not_served(self):
         for path in ("/../web_panel.py", "/web/../web_panel.py", "/status.json", "/%2e%2e/etc/passwd"):
             self.assertEqual(self.request("GET", path)[0].status, 404, path)
